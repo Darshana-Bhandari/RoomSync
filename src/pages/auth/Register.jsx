@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Eye,
   EyeOff,
@@ -12,6 +12,7 @@ import {
   Wallet,
   Receipt,
   Users,
+  Building2,
 } from "lucide-react";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -23,7 +24,24 @@ const FEATURES = [
   { icon: Users, label: "Keep your household in sync" },
 ];
 
+const ROLES = [
+  {
+    id: "PROPERTY_MANAGER",
+    title: "Property Manager",
+    description: "Manage properties, rooms & residents",
+    icon: Building2,
+  },
+  {
+    id: "ROOMMATE",
+    title: "Roommate",
+    description: "Join a shared home & manage expenses",
+    icon: Users,
+  },
+];
+
 const Register = () => {
+  const navigate = useNavigate();
+
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [formData, setFormData] = useState({
@@ -31,6 +49,7 @@ const Register = () => {
     email: "",
     password: "",
     confirmPassword: "",
+    role: "",
   });
   const [errors, setErrors] = useState({});
   const [touched, setTouched] = useState({});
@@ -64,6 +83,10 @@ const Register = () => {
       next.confirmPassword = "Passwords do not match.";
     }
 
+    if (!data.role) {
+      next.role = "Please select your account type.";
+    }
+
     return next;
   };
 
@@ -75,6 +98,14 @@ const Register = () => {
     if (touched[name]) {
       setErrors(validate(nextData));
     }
+    if (authError) setAuthError("");
+  };
+
+  const handleRoleSelect = (roleId) => {
+    const nextData = { ...formData, role: roleId };
+    setFormData(nextData);
+    setTouched((prev) => ({ ...prev, role: true }));
+    setErrors(validate(nextData));
     if (authError) setAuthError("");
   };
 
@@ -93,6 +124,7 @@ const Register = () => {
       email: true,
       password: true,
       confirmPassword: true,
+      role: true,
     });
 
     if (Object.keys(validationErrors).length > 0) return;
@@ -102,7 +134,21 @@ const Register = () => {
 
     try {
       // Replace this with your real API call later
+      // Example payload:
+      // {
+      //   fullName: formData.fullName,
+      //   email: formData.email,
+      //   password: formData.password,
+      //   role: formData.role, // "PROPERTY_MANAGER" | "ROOMMATE"
+      // }
       await new Promise((resolve) => setTimeout(resolve, 1500));
+
+      // Navigate based on selected role after successful registration
+      if (formData.role === "ROOMMATE") {
+        navigate("/join-property");
+      } else {
+        navigate("/property");
+      }
     } catch (err) {
       setAuthError(err.message || "Something went wrong. Please try again.");
     } finally {
@@ -120,6 +166,7 @@ const Register = () => {
   const confirmPasswordInvalid = Boolean(
     touched.confirmPassword && errors.confirmPassword
   );
+  const roleInvalid = Boolean(touched.role && errors.role);
 
   return (
     <div className="min-h-screen flex bg-[#F6F8F7]">
@@ -154,7 +201,7 @@ const Register = () => {
             </div>
           </div>
 
-          {/* Main Content - moved slightly upward */}
+          {/* Main Content */}
           <div className="space-y-7 max-w-lg -mt-6">
             <div>
               <h1 className="text-4xl xl:text-5xl font-bold tracking-tight leading-[1.08] mb-5">
@@ -220,6 +267,60 @@ const Register = () => {
           )}
 
           <form onSubmit={handleSubmit} noValidate className="space-y-5">
+            {/* Role Selection */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2.5">
+                Choose your account type
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                {ROLES.map((role) => {
+                  const Icon = role.icon;
+                  const isSelected = formData.role === role.id;
+
+                  return (
+                    <button
+                      key={role.id}
+                      type="button"
+                      onClick={() => handleRoleSelect(role.id)}
+                      className={`relative flex flex-col items-start gap-2.5 rounded-2xl border p-4 text-left transition-all duration-200 ${
+                        isSelected
+                          ? "border-teal-500 bg-teal-50/70 ring-2 ring-teal-500/20 shadow-sm"
+                          : "border-slate-200 bg-slate-50/50 hover:border-slate-300 hover:bg-white"
+                      }`}
+                    >
+                      <div
+                        className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                          isSelected
+                            ? "bg-teal-600 text-white"
+                            : "bg-white border border-slate-200 text-slate-500"
+                        }`}
+                      >
+                        <Icon className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <p
+                          className={`text-sm font-semibold leading-tight ${
+                            isSelected ? "text-teal-800" : "text-slate-800"
+                          }`}
+                        >
+                          {role.title}
+                        </p>
+                        <p className="text-xs text-slate-500 mt-0.5 leading-snug">
+                          {role.description}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              {roleInvalid && (
+                <p className="mt-1.5 flex items-center gap-1 text-sm text-red-600">
+                  <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                  {errors.role}
+                </p>
+              )}
+            </div>
+
             {/* Full Name */}
             <div>
               <label
