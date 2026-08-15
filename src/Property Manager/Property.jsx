@@ -19,6 +19,12 @@ import {
   Users,
   Wallet,
   Info,
+  Lock,
+  KeyRound,
+  Copy,
+  Check,
+  Sparkles,
+  Loader2,
 } from "lucide-react";
 
 const PROPERTY_TYPES = [
@@ -33,13 +39,19 @@ const PROPERTY_TYPES = [
 const SETUP_STEPS = [
   { key: "details", label: "Details" },
   { key: "photos", label: "Photos" },
+  { key: "invite", label: "Invite" },
   { key: "rooms", label: "Rooms" },
-  { key: "complete", label: "Complete" },
 ];
 
 const MAX_PHOTOS = 5;
 const MAX_FILE_SIZE_MB = 5;
 const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
+// Simulated "already taken" codes — replace with a real API call later.
+const TAKEN_CODES = ["GREENHOUSE", "ROOMSYNC", "TESTHOUSE", "KTMHOUSE"];
+
+const CODE_MIN = 6;
+const CODE_MAX = 12;
 
 /* ──────────────── Small building blocks ──────────────── */
 
@@ -86,6 +98,23 @@ const SetupProgress = ({ currentKey }) => {
     </div>
   );
 };
+
+const TopBar = () => (
+  <header className="bg-white border-b border-slate-200/80 px-6 py-4 flex items-center justify-between">
+    <div className="flex items-center gap-3">
+      <div className="w-9 h-9 bg-teal-600 rounded-xl flex items-center justify-center">
+        <Home className="w-5 h-5 text-white" />
+      </div>
+      <span className="text-lg font-bold text-slate-900">RoomSync</span>
+    </div>
+    <div className="flex items-center gap-2 text-sm text-slate-600">
+      <div className="w-8 h-8 rounded-full bg-teal-100 flex items-center justify-center">
+        <User className="w-4 h-4 text-teal-700" />
+      </div>
+      <span className="hidden sm:inline font-medium">Manager</span>
+    </div>
+  </header>
+);
 
 const PropertyPreviewCard = ({ formData, photos }) => {
   const hasCore = formData.name || formData.address || formData.type || formData.rooms;
@@ -177,9 +206,37 @@ const PropertyPreviewCard = ({ formData, photos }) => {
   );
 };
 
+/* ──────────────── Code helpers ──────────────── */
+
+// Uppercase, strip anything that isn't A-Z or 0-9, cap length.
+const sanitizeCode = (raw) =>
+  raw
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, CODE_MAX);
+
+const generateRandomCode = () => {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no ambiguous 0/O/1/I
+  let suffix = "";
+  for (let i = 0; i < 4; i++) {
+    suffix += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return `ROOM-${suffix}`;
+};
+
+const validateCodeFormat = (code) => {
+  if (!code) return "Enter an invitation code.";
+  if (code.length < CODE_MIN) return `Must be at least ${CODE_MIN} characters.`;
+  if (code.length > CODE_MAX) return `Must be ${CODE_MAX} characters or fewer.`;
+  if (!/^[A-Z0-9-]+$/.test(code)) return "Letters and numbers only.";
+  return "";
+};
+
 const Property = () => {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
+
+  /* ──────────────── Property form state ──────────────── */
 
   const [formData, setFormData] = useState({
     name: "",
@@ -195,9 +252,21 @@ const Property = () => {
   const [errors, setErrors] = useState({});
   const [touched, setTouched] = useState({});
   const [isLoading, setIsLoading] = useState(false);
-  const [isCreated, setIsCreated] = useState(false);
-  const [createdProperty, setCreatedProperty] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
+
+  // stage: "form" -> "success" -> "invite" -> "inviteConfirm"
+  const [stage, setStage] = useState("form");
+  const [createdProperty, setCreatedProperty] = useState(null);
+
+  /* ──────────────── Invitation code state ──────────────── */
+
+  const [inviteCode, setInviteCode] = useState("");
+  const [codeFormatError, setCodeFormatError] = useState("");
+  // availability: "idle" | "checking" | "available" | "taken"
+  const [availability, setAvailability] = useState("idle");
+  const [isSavingCode, setIsSavingCode] = useState(false);
+  const [savedCode, setSavedCode] = useState("");
+  const [isCopied, setIsCopied] = useState(false);
 
   // Revoke object URLs on unmount to avoid memory leaks
   useEffect(() => {
@@ -206,6 +275,27 @@ const Property = () => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Debounced availability check whenever the code changes and is well-formed
+  useEffect(() => {
+    const formatError = validateCodeFormat(inviteCode);
+    setCodeFormatError(formatError);
+
+    if (formatError) {
+      setAvailability("idle");
+      return;
+    }
+
+    setAvailability("checking");
+    const timer = setTimeout(() => {
+      const taken = TAKEN_CODES.includes(inviteCode.replace(/-/g, ""));
+      setAvailability(taken ? "taken" : "available");
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [inviteCode]);
+
+  /* ──────────────── Property form validation ──────────────── */
 
   const validate = (data) => {
     const next = {};
@@ -325,7 +415,7 @@ const Property = () => {
     setIsDragging(false);
   };
 
-  /* ──────────────── Submit ──────────────── */
+  /* ──────────────── Submit property ──────────────── */
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -367,7 +457,7 @@ const Property = () => {
         photoCount: photos.length,
         coverUrl: photos[0]?.url || null,
       });
-      setIsCreated(true);
+      setStage("success");
     } catch (err) {
       setErrors({
         submit: err.message || "Something went wrong. Please try again.",
@@ -377,7 +467,43 @@ const Property = () => {
     }
   };
 
-  const handleContinue = () => {
+  /* ──────────────── Invitation code handlers ──────────────── */
+
+  const handleCodeChange = (e) => {
+    setInviteCode(sanitizeCode(e.target.value));
+  };
+
+  const handleGenerateCode = () => {
+    setInviteCode(generateRandomCode());
+  };
+
+  const canSaveCode = !codeFormatError && availability === "available" && !isSavingCode;
+
+  const handleSaveCode = async () => {
+    if (!canSaveCode) return;
+    setIsSavingCode(true);
+    try {
+      // Replace with your real API call later
+      // await api.saveInvitationCode({ propertyId, code: inviteCode });
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      setSavedCode(inviteCode);
+      setStage("inviteConfirm");
+    } finally {
+      setIsSavingCode(false);
+    }
+  };
+
+  const handleCopyCode = async () => {
+    try {
+      await navigator.clipboard.writeText(savedCode);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 1800);
+    } catch {
+      // Clipboard API unavailable — silently ignore.
+    }
+  };
+
+  const handleContinueToRooms = () => {
     navigate("/add-room");
   };
 
@@ -390,31 +516,28 @@ const Property = () => {
   const hasCoreDetails =
     formData.name.trim() && formData.address.trim() && formData.type && formData.rooms;
 
-  // ── Success State ──────────────────────────────────────────
-  if (isCreated && createdProperty) {
+  const codeChecklist = [
+    {
+      label: `${CODE_MIN}–${CODE_MAX} characters`,
+      met: inviteCode.length >= CODE_MIN && inviteCode.length <= CODE_MAX,
+    },
+    {
+      label: "Letters and numbers only",
+      met: inviteCode.length > 0 && /^[A-Z0-9-]+$/.test(inviteCode),
+    },
+    { label: "Easy to share with roommates", met: inviteCode.length > 0 },
+  ];
+
+  /* ══════════════════ STAGE: Property Created ══════════════════ */
+  if (stage === "success" && createdProperty) {
     return (
       <div className="min-h-screen bg-[#F6F8F7] flex flex-col">
-        {/* Top bar */}
-        <header className="bg-white border-b border-slate-200/80 px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-teal-600 rounded-xl flex items-center justify-center">
-              <Home className="w-5 h-5 text-white" />
-            </div>
-            <span className="text-lg font-bold text-slate-900">RoomSync</span>
-          </div>
-          <div className="flex items-center gap-2 text-sm text-slate-600">
-            <div className="w-8 h-8 rounded-full bg-teal-100 flex items-center justify-center">
-              <User className="w-4 h-4 text-teal-700" />
-            </div>
-            <span className="hidden sm:inline font-medium">Manager</span>
-          </div>
-        </header>
+        <TopBar />
 
         <div className="px-6 pt-8">
-          <SetupProgress currentKey="rooms" />
+          <SetupProgress currentKey="invite" />
         </div>
 
-        {/* Success content */}
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="w-full max-w-md rounded-3xl border border-slate-200/80 bg-white p-8 sm:p-10 shadow-[0_24px_70px_-25px_rgba(15,23,42,0.22)] text-center animate-[fadeIn_0.5s_ease-out]">
             <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-teal-50 flex items-center justify-center">
@@ -425,8 +548,8 @@ const Property = () => {
               Your property is ready! 🎉
             </h2>
             <p className="text-slate-500 mb-8">
-              Great! Your property has been created. Now let's set up the
-              rooms and get your home ready for residents.
+              Property created. Next, create an invitation code so roommates
+              can find and request to join.
             </p>
 
             <div className="rounded-2xl border border-slate-200 bg-slate-50/60 overflow-hidden text-left mb-8">
@@ -486,7 +609,7 @@ const Property = () => {
             </div>
 
             <button
-              onClick={handleContinue}
+              onClick={() => setStage("invite")}
               className="group w-full flex items-center justify-center gap-2 bg-teal-600 hover:bg-teal-700 text-white font-semibold py-3.5 px-4 rounded-2xl transition-all duration-200 shadow-lg shadow-teal-600/25 hover:shadow-teal-600/40 hover:-translate-y-0.5 active:translate-y-0"
             >
               Continue to Room Setup
@@ -505,24 +628,246 @@ const Property = () => {
     );
   }
 
-  // ── Form State ─────────────────────────────────────────────
+  /* ══════════════════ STAGE: Create Invitation Code ══════════════════ */
+  if (stage === "invite") {
+    return (
+      <div className="min-h-screen bg-[#F6F8F7] flex flex-col">
+        <TopBar />
+
+        <div className="px-6 pt-8">
+          <SetupProgress currentKey="invite" />
+        </div>
+
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="w-full max-w-md rounded-3xl border border-slate-200/80 bg-white p-8 sm:p-10 shadow-[0_24px_70px_-25px_rgba(15,23,42,0.22)] text-center animate-[fadeIn_0.5s_ease-out]">
+            <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-teal-50 flex items-center justify-center">
+              <Lock className="w-8 h-8 text-teal-600" />
+            </div>
+
+            <h2 className="text-2xl font-bold text-slate-900 mb-2">
+              Create Invitation Code
+            </h2>
+            <p className="text-slate-500 mb-7">
+              Create a unique code that your roommates can use to find and
+              request to join {createdProperty?.name || "your property"}.
+            </p>
+
+            <div className="text-left mb-1.5">
+              <label
+                htmlFor="inviteCode"
+                className="block text-sm font-medium text-slate-700 mb-1.5"
+              >
+                Invitation Code
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                  <KeyRound
+                    className={`h-5 w-5 ${
+                      codeFormatError && inviteCode
+                        ? "text-red-400"
+                        : availability === "taken"
+                        ? "text-red-400"
+                        : availability === "available"
+                        ? "text-teal-500"
+                        : "text-slate-400"
+                    }`}
+                  />
+                </div>
+                <input
+                  id="inviteCode"
+                  name="inviteCode"
+                  type="text"
+                  value={inviteCode}
+                  onChange={handleCodeChange}
+                  placeholder="GREEN2026"
+                  maxLength={CODE_MAX}
+                  autoComplete="off"
+                  spellCheck={false}
+                  className={`w-full pl-11 pr-11 py-3 rounded-xl border outline-none tracking-wider font-semibold text-slate-800 transition-all duration-200 placeholder:text-slate-300 placeholder:font-normal placeholder:tracking-normal focus:bg-white focus:ring-2 ${
+                    availability === "taken"
+                      ? "border-red-300 bg-white focus:border-red-500 focus:ring-red-500/20"
+                      : availability === "available"
+                      ? "border-teal-300 bg-white focus:border-teal-500 focus:ring-teal-500/20"
+                      : "border-slate-200 bg-slate-50/50 focus:border-teal-500 focus:ring-teal-500/10"
+                  }`}
+                />
+                <div className="absolute inset-y-0 right-3.5 flex items-center">
+                  {availability === "checking" && (
+                    <Loader2 className="h-4 w-4 text-slate-400 animate-spin" />
+                  )}
+                  {availability === "available" && (
+                    <Check className="h-4 w-4 text-teal-600" />
+                  )}
+                  {availability === "taken" && (
+                    <X className="h-4 w-4 text-red-500" />
+                  )}
+                </div>
+              </div>
+
+              {/* Availability / format feedback */}
+              <div className="mt-1.5 min-h-[1.25rem] text-left">
+                {inviteCode && codeFormatError ? (
+                  <p className="flex items-center gap-1 text-sm text-red-600">
+                    <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                    {codeFormatError}
+                  </p>
+                ) : availability === "checking" ? (
+                  <p className="text-sm text-slate-400">Checking availability…</p>
+                ) : availability === "available" ? (
+                  <p className="flex items-center gap-1 text-sm text-teal-600">
+                    <Check className="h-3.5 w-3.5 flex-shrink-0" />
+                    Code is available
+                  </p>
+                ) : availability === "taken" ? (
+                  <p className="flex items-center gap-1 text-sm text-red-600">
+                    <X className="h-3.5 w-3.5 flex-shrink-0" />
+                    This code is already taken. Try another.
+                  </p>
+                ) : null}
+              </div>
+            </div>
+
+            {/* Checklist */}
+            <ul className="text-left space-y-1.5 mt-4 mb-7">
+              {codeChecklist.map((item) => (
+                <li
+                  key={item.label}
+                  className={`flex items-center gap-2 text-sm ${
+                    item.met ? "text-teal-700" : "text-slate-400"
+                  }`}
+                >
+                  <CheckCircle2
+                    className={`h-4 w-4 flex-shrink-0 ${
+                      item.met ? "text-teal-500" : "text-slate-300"
+                    }`}
+                  />
+                  {item.label}
+                </li>
+              ))}
+            </ul>
+
+            <button
+              onClick={handleSaveCode}
+              disabled={!canSaveCode}
+              className="group w-full flex items-center justify-center gap-2 bg-teal-600 hover:bg-teal-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-semibold py-3.5 px-4 rounded-2xl transition-all duration-200 shadow-lg shadow-teal-600/25 hover:shadow-teal-600/40 disabled:shadow-none hover:-translate-y-0.5 active:translate-y-0"
+            >
+              {isSavingCode ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Saving code...
+                </>
+              ) : (
+                <>
+                  Save Code & Continue
+                  <ArrowRight className="w-5 h-5 transition-transform duration-200 group-hover:translate-x-1" />
+                </>
+              )}
+            </button>
+
+            <div className="flex items-center gap-3 my-6">
+              <div className="h-px flex-1 bg-slate-200" />
+              <span className="text-xs font-medium text-slate-400">OR</span>
+              <div className="h-px flex-1 bg-slate-200" />
+            </div>
+
+            <p className="text-sm text-slate-500 mb-3">
+              Don't want to create one?
+            </p>
+            <button
+              type="button"
+              onClick={handleGenerateCode}
+              className="w-full flex items-center justify-center gap-2 border border-slate-200 hover:border-teal-300 hover:bg-teal-50/50 text-slate-700 font-medium py-3 px-4 rounded-2xl transition-colors duration-200"
+            >
+              <Sparkles className="w-4 h-4 text-teal-600" />
+              Generate a Code
+            </button>
+
+            <p className="flex items-center justify-center gap-1.5 text-xs text-slate-400 mt-7">
+              <Lock className="w-3.5 h-3.5" />
+              Only people with this code can find your property.
+            </p>
+          </div>
+        </div>
+
+        <style>{`
+          @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
+  /* ══════════════════ STAGE: Invitation Code Confirmation ══════════════════ */
+  if (stage === "inviteConfirm") {
+    return (
+      <div className="min-h-screen bg-[#F6F8F7] flex flex-col">
+        <TopBar />
+
+        <div className="px-6 pt-8">
+          <SetupProgress currentKey="rooms" />
+        </div>
+
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="w-full max-w-md rounded-3xl border border-slate-200/80 bg-white p-8 sm:p-10 shadow-[0_24px_70px_-25px_rgba(15,23,42,0.22)] text-center animate-[fadeIn_0.5s_ease-out]">
+            <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-teal-50 flex items-center justify-center">
+              <CheckCircle2 className="w-8 h-8 text-teal-600" />
+            </div>
+
+            <h2 className="text-2xl font-bold text-slate-900 mb-2">
+              Invitation Code Created
+            </h2>
+            <p className="text-slate-500 mb-6">Your roommates can use:</p>
+
+            <button
+              type="button"
+              onClick={handleCopyCode}
+              title="Copy code"
+              className="w-full flex items-center justify-between gap-3 rounded-2xl border-2 border-teal-200 bg-teal-50/60 px-5 py-4 mb-2 hover:border-teal-300 transition-colors"
+            >
+              <span className="text-xl font-bold tracking-widest text-teal-800 mx-auto">
+                {savedCode}
+              </span>
+              {isCopied ? (
+                <Check className="w-5 h-5 text-teal-600 flex-shrink-0" />
+              ) : (
+                <Copy className="w-5 h-5 text-teal-500 flex-shrink-0" />
+              )}
+            </button>
+            <p className="text-xs text-slate-400 mb-6">
+              {isCopied ? "Copied to clipboard!" : "Tap the code to copy it"}
+            </p>
+
+            <p className="text-sm text-slate-500 mb-8">
+              Share this code with the people you want to invite to your
+              property.
+            </p>
+
+            <button
+              onClick={handleContinueToRooms}
+              className="group w-full flex items-center justify-center gap-2 bg-teal-600 hover:bg-teal-700 text-white font-semibold py-3.5 px-4 rounded-2xl transition-all duration-200 shadow-lg shadow-teal-600/25 hover:shadow-teal-600/40 hover:-translate-y-0.5 active:translate-y-0"
+            >
+              Continue to Room Setup
+              <ArrowRight className="w-5 h-5 transition-transform duration-200 group-hover:translate-x-1" />
+            </button>
+          </div>
+        </div>
+
+        <style>{`
+          @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
+  /* ══════════════════ STAGE: Property Form (default) ══════════════════ */
   return (
     <div className="min-h-screen bg-[#F6F8F7] flex flex-col">
-      {/* Top bar */}
-      <header className="bg-white border-b border-slate-200/80 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-teal-600 rounded-xl flex items-center justify-center">
-            <Home className="w-5 h-5 text-white" />
-          </div>
-          <span className="text-lg font-bold text-slate-900">RoomSync</span>
-        </div>
-        <div className="flex items-center gap-2 text-sm text-slate-600">
-          <div className="w-8 h-8 rounded-full bg-teal-100 flex items-center justify-center">
-            <User className="w-4 h-4 text-teal-700" />
-          </div>
-          <span className="hidden sm:inline font-medium">Manager</span>
-        </div>
-      </header>
+      <TopBar />
 
       {/* Main content */}
       <div className="flex-1 flex flex-col items-center p-6 sm:p-10">
