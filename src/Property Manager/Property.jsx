@@ -504,7 +504,7 @@ const Property = () => {
   };
 
   const handleContinueToRooms = () => {
-    navigate("/add-room");
+    navigate("/manager-dashboard");
   };
 
   const nameInvalid = Boolean(touched.name && errors.name);

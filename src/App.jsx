@@ -1,15 +1,16 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 
-// Authentication Pages
+// Authentication
 import Login from "./pages/auth/Login";
 import Register from "./pages/auth/Register";
 import ForgotPassword from "./pages/auth/ForgotPassword";
 import ResetPassword from "./pages/auth/ResetPassword";
 
-// Property Manager Pages
+// Property Manager
+import ManagerDashboard from "./Property Manager/ManagerDashboard";
 import Property from "./Property Manager/Property";
 
-// Roommate Pages
+// Roommate
 import JoinProperty from "./Roommate/JoinProperty";
 
 function App() {
@@ -23,12 +24,13 @@ function App() {
         <Route path="/reset-password" element={<ResetPassword />} />
 
         {/* Property Manager */}
+        <Route path="/manager-dashboard" element={<ManagerDashboard />} />
         <Route path="/property" element={<Property />} />
 
         {/* Roommate */}
         <Route path="/join-property" element={<JoinProperty />} />
 
-        {/* Default */}
+        {/* Default Route */}
         <Route path="/" element={<Login />} />
       </Routes>
     </BrowserRouter>
