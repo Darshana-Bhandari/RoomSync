@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Home,
@@ -596,7 +596,6 @@ const ManagerDashboard = () => {
               </ul>
             </div>
           </div>
-
           {/* Bottom Row */}
           <div className="mb-8 grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
             {/* Recent Rent Payments */}
