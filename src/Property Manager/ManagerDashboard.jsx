@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import {
   Home,
   Building2,
@@ -25,46 +25,339 @@ import {
   Zap,
   TrendingDown,
   Activity,
+  Loader2,
 } from "lucide-react";
-import { loadProperties } from "../utils/propertyStorage"; // adjust path if needed
+import { loadProperties } from "../utils/propertyStorage"; // adjust path
+
+// ---------- helpers ----------
+const getGreeting = () => {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+};
+
+const formatCurrency = (n) =>
+  `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
 const ManagerDashboard = () => {
   const navigate = useNavigate();
-  const [currentPropertyIndex, setCurrentPropertyIndex] = useState(0);
-  const [properties, setProperties] = useState([]);
+  const location = useLocation();
 
-  // Load properties whenever the dashboard mounts
+  const [properties, setProperties] = useState([]);
+  const [selectedPropertyId, setSelectedPropertyId] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Load + live refresh when Property page saves
   useEffect(() => {
-    setProperties(loadProperties());
+    const refresh = () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const data = loadProperties();
+        setProperties(Array.isArray(data) ? data : []);
+      } catch (err) {
+        console.error(err);
+        setError("Unable to load properties.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    refresh();
+    window.addEventListener("propertiesUpdated", refresh);
+    return () => window.removeEventListener("propertiesUpdated", refresh);
   }, []);
 
-  const hasProperties = properties.length > 0;
-  const currentProperty = hasProperties
-    ? properties[currentPropertyIndex]
-    : null;
-
-  const nextProperty = () => {
-    if (!hasProperties) return;
-    setCurrentPropertyIndex((prev) => (prev + 1) % properties.length);
-  };
-
-  const prevProperty = () => {
-    if (!hasProperties) return;
-    setCurrentPropertyIndex((prev) =>
-      prev === 0 ? properties.length - 1 : prev - 1
+  // Keep selectedPropertyId valid
+  useEffect(() => {
+    if (properties.length === 0) {
+      setSelectedPropertyId(null);
+      return;
+    }
+    const exists = properties.some(
+      (p) => String(p.id) === String(selectedPropertyId)
     );
-  };
+    if (!selectedPropertyId || !exists) {
+      setSelectedPropertyId(properties[0].id);
+    }
+  }, [properties, selectedPropertyId]);
 
+  const currentProperty = useMemo(() => {
+    if (!selectedPropertyId) return null;
+    return (
+      properties.find((p) => String(p.id) === String(selectedPropertyId)) ||
+      null
+    );
+  }, [properties, selectedPropertyId]);
+
+  const hasProperties = properties.length > 0;
+
+  // ---------- Aggregate stats across all properties ----------
+  const totalRooms = useMemo(
+    () => properties.reduce((s, p) => s + (Number(p.rooms) || 0), 0),
+    [properties]
+  );
+
+  const totalCapacity = useMemo(
+    () =>
+      properties.reduce(
+        (s, p) =>
+          s +
+          (p.totalCapacity ||
+            Number(p.rooms || 0) * Number(p.peoplePerRoom || 1)),
+        0
+      ),
+    [properties]
+  );
+
+  const occupiedCapacity = useMemo(
+    () =>
+      properties.reduce(
+        (s, p) => s + (Number(p.occupiedCapacity) || (p.residents?.length || 0)),
+        0
+      ),
+    [properties]
+  );
+
+  const occupancyRate =
+    totalCapacity > 0
+      ? Math.round((occupiedCapacity / totalCapacity) * 100)
+      : 0;
+
+  // ---------- Rent stats (from residents) ----------
+  const rentStats = useMemo(() => {
+    let expected = 0;
+    let collected = 0;
+    let pending = 0;
+    let overdue = 0;
+    const recentPayments = [];
+
+    properties.forEach((property) => {
+      (property.residents || []).forEach((resident) => {
+        const rent = Number(resident.rent || 0);
+        expected += rent;
+
+        if (resident.rentStatus === "PAID") {
+          collected += rent;
+          recentPayments.push({
+            id: resident.id,
+            name: resident.name,
+            amount: rent,
+            status: "paid",
+            propertyName: property.name,
+          });
+        } else if (resident.rentStatus === "PENDING") {
+          pending += rent;
+        } else if (resident.rentStatus === "OVERDUE") {
+          overdue += rent;
+        }
+      });
+    });
+
+    const collectionRate =
+      expected > 0 ? Math.round((collected / expected) * 100) : 0;
+
+    return {
+      expected,
+      collected,
+      pending,
+      overdue,
+      collectionRate,
+      recentPayments: recentPayments.slice(0, 5),
+    };
+  }, [properties]);
+
+  // ---------- Bills ----------
+  const billStats = useMemo(() => {
+    let total = 0;
+    let paid = 0;
+    properties.forEach((p) => {
+      (p.bills || []).forEach((b) => {
+        total += 1;
+        if (b.status === "PAID") paid += 1;
+      });
+    });
+    return { total, paid };
+  }, [properties]);
+
+  // ---------- Health Score ----------
+  const healthScore = useMemo(() => {
+    const rentScore = rentStats.collectionRate;
+    const occupancyScore = occupancyRate;
+    const billsScore =
+      billStats.total > 0
+        ? Math.round((billStats.paid / billStats.total) * 100)
+        : 100;
+    const overduePenalty = rentStats.overdue > 0 ? 10 : 0;
+
+    const score = Math.max(
+      0,
+      Math.min(
+        100,
+        Math.round(
+          rentScore * 0.4 + occupancyScore * 0.3 + billsScore * 0.3 - overduePenalty
+        )
+      )
+    );
+
+    return {
+      score,
+      rentScore,
+      occupancyScore,
+      billsScore,
+    };
+  }, [rentStats, occupancyRate, billStats]);
+
+  // ---------- Needs Attention ----------
+  const attentionItems = useMemo(() => {
+    const items = [];
+
+    properties.forEach((property) => {
+      (property.residents || []).forEach((resident) => {
+        if (resident.rentStatus === "OVERDUE") {
+          items.push({
+            id: `rent-${resident.id}`,
+            type: "rent",
+            title: `${resident.name} rent`,
+            description: `${formatCurrency(resident.rent)} · Overdue · ${property.name}`,
+            severity: "high",
+            path: "/rent",
+          });
+        } else if (resident.rentStatus === "PENDING") {
+          items.push({
+            id: `rent-p-${resident.id}`,
+            type: "rent",
+            title: `${resident.name} rent`,
+            description: `${formatCurrency(resident.rent)} · Pending · ${property.name}`,
+            severity: "medium",
+            path: "/rent",
+          });
+        }
+      });
+
+      (property.bills || []).forEach((bill) => {
+        if (bill.status === "PENDING") {
+          items.push({
+            id: `bill-${bill.id}`,
+            type: "bill",
+            title: `${bill.type || "Bill"} pending`,
+            description: `${formatCurrency(bill.amount)} · ${property.name}`,
+            severity: "medium",
+            path: "/manager/bills",
+          });
+        }
+      });
+    });
+
+    // Sort high severity first
+    return items.sort((a, b) =>
+      a.severity === "high" && b.severity !== "high" ? -1 : 1
+    );
+  }, [properties]);
+
+  // ---------- Occupancy rooms for current property ----------
+  const occupancyRooms = useMemo(() => {
+    if (!currentProperty) return [];
+    const list = currentProperty.roomsList || [];
+    if (list.length > 0) {
+      return list.map((r) => {
+        const fill =
+          r.capacity > 0
+            ? Math.round(((r.residentsCount || 0) / r.capacity) * 100)
+            : 0;
+        let status = "empty";
+        if (fill >= 100) status = "full";
+        else if (fill > 0) status = "partial";
+        return {
+          name: r.name,
+          status,
+          fill,
+          residents: r.residentsCount || 0,
+        };
+      });
+    }
+    // Fallback: empty rooms from property.rooms count
+    return Array.from({ length: Number(currentProperty.rooms) || 0 }, (_, i) => ({
+      name: `Room ${101 + i}`,
+      status: "empty",
+      fill: 0,
+      residents: 0,
+    }));
+  }, [currentProperty]);
+
+  // ---------- Recent activities ----------
+  const recentActivities = useMemo(() => {
+    const all = [];
+    properties.forEach((p) => {
+      (p.activities || []).forEach((a) => {
+        all.push({ ...a, propertyName: p.name });
+      });
+    });
+    // newest first (simple)
+    return all.slice(0, 6);
+  }, [properties]);
+
+  // ---------- Top stats cards ----------
+  const stats = useMemo(
+    () => [
+      {
+        icon: Building2,
+        value: String(properties.length),
+        label: "Properties",
+        sub: `${totalRooms} Rooms`,
+        color: "bg-teal-50 text-teal-600",
+        trend: properties.length > 0 ? "Active" : "None yet",
+        trendUp: properties.length > 0,
+      },
+      {
+        icon: Users,
+        value: String(totalCapacity),
+        label: "Capacity",
+        sub: `${occupiedCapacity} occupied`,
+        color: "bg-emerald-50 text-emerald-600",
+        trend: occupiedCapacity > 0 ? "In use" : "Empty",
+        trendUp: occupiedCapacity > 0,
+      },
+      {
+        icon: BedDouble,
+        value: `${occupancyRate}%`,
+        label: "Occupancy",
+        sub: `${occupiedCapacity}/${totalCapacity} spaces`,
+        color: "bg-cyan-50 text-cyan-600",
+        trend: occupancyRate >= 80 ? "Healthy" : occupancyRate > 0 ? "Low" : "—",
+        trendUp: occupancyRate >= 80,
+      },
+      {
+        icon: DollarSign,
+        value: formatCurrency(rentStats.expected),
+        label: "Expected Rent",
+        sub: `${rentStats.collectionRate}% collected`,
+        color: "bg-amber-50 text-amber-600",
+        trend:
+          rentStats.overdue > 0
+            ? `${formatCurrency(rentStats.overdue)} overdue`
+            : "On track",
+        trendUp: rentStats.overdue === 0,
+      },
+    ],
+    [
+      properties.length,
+      totalRooms,
+      totalCapacity,
+      occupiedCapacity,
+      occupancyRate,
+      rentStats,
+    ]
+  );
+
+  // ---------- Nav ----------
   const navItems = [
     {
       section: "MAIN",
       items: [
-        {
-          icon: Home,
-          label: "Dashboard",
-          active: true,
-          path: "/manager-dashboard",
-        },
+        { icon: Home, label: "Dashboard", path: "/manager-dashboard" },
       ],
     },
     {
@@ -94,99 +387,57 @@ const ManagerDashboard = () => {
     {
       section: "SYSTEM",
       items: [
-        {
-          icon: Bell,
-          label: "Notifications",
-          path: "/manager/notifications",
-        },
+        { icon: Bell, label: "Notifications", path: "/manager/notifications" },
         { icon: Settings, label: "Settings", path: "/manager/settings" },
       ],
     },
   ];
 
-  // Stats derived from real properties
-  const stats = useMemo(() => {
-    const totalProperties = properties.length;
-    const totalRooms = properties.reduce((s, p) => s + (p.rooms || 0), 0);
-    const totalCapacity = properties.reduce(
-      (s, p) =>
-        s + (p.totalCapacity || p.rooms * (p.peoplePerRoom || 1)),
-      0
-    );
-    const totalPotentialRent = properties.reduce(
-      (s, p) =>
-        s + (p.totalPotentialRent || p.rooms * (p.rent || 0)),
-      0
-    );
-
-    return [
-      {
-        icon: Building2,
-        value: String(totalProperties),
-        label: "Properties",
-        sub: `${totalRooms} Rooms`,
-        color: "bg-teal-50 text-teal-600",
-        trend: totalProperties > 0 ? "Active" : "None yet",
-        trendUp: totalProperties > 0,
-      },
-      {
-        icon: Users,
-        value: String(totalCapacity),
-        label: "Capacity",
-        sub: "people (max)",
-        color: "bg-emerald-50 text-emerald-600",
-        trend: "—",
-        trendUp: true,
-      },
-      {
-        icon: BedDouble,
-        value: totalRooms ? "—" : "0%",
-        label: "Occupancy",
-        sub: "add residents to track",
-        color: "bg-cyan-50 text-cyan-600",
-        trend: "—",
-        trendUp: true,
-      },
-      {
-        icon: DollarSign,
-        value: totalPotentialRent
-          ? `₹${totalPotentialRent.toLocaleString()}`
-          : "₹0",
-        label: "Potential Rent",
-        sub: "per month (all rooms)",
-        color: "bg-amber-50 text-amber-600",
-        trend: "—",
-        trendUp: false,
-      },
-    ];
-  }, [properties]);
-
-  // Keep these mock for now (will become real when Rooms / Residents / Rent are wired)
-  const recentPayments = [
-    { name: "Darshana", amount: "₹10,000", status: "paid", daysAgo: "Today" },
-    { name: "Ram", amount: "₹10,000", status: "paid", daysAgo: "Yesterday" },
-    { name: "Sita", amount: "₹12,000", status: "pending", daysAgo: "Overdue" },
-    { name: "Anish", amount: "₹9,000", status: "paid", daysAgo: "2 days" },
+  const quickActions = [
+    { label: "Property", icon: Building2, path: "/property" },
+    { label: "Resident", icon: Users, path: "/manager/residents" },
+    { label: "Rent", icon: DollarSign, path: "/rent" },
+    { label: "Bill", icon: Receipt, path: "/manager/bills" },
   ];
 
-  const rooms = [
-    { name: "Room 101", status: "full", fill: 100, residents: 2 },
-    { name: "Room 102", status: "full", fill: 100, residents: 2 },
-    { name: "Room 103", status: "full", fill: 100, residents: 2 },
-    { name: "Room 104", status: "partial", fill: 66, residents: 1 },
-    { name: "Room 105", status: "full", fill: 100, residents: 2 },
-    { name: "Room 106", status: "empty", fill: 0, residents: 0 },
-  ];
+  // ---------- Loading / Error ----------
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-3 text-slate-500">
+          <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+          <p className="text-sm">Loading dashboard…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-8">
+        <div className="max-w-md rounded-xl border border-red-200 bg-red-50 p-6 text-center">
+          <AlertCircle className="mx-auto h-8 w-8 text-red-500" />
+          <p className="mt-3 font-semibold text-red-800">{error}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-4 rounded-lg bg-red-600 px-4 py-2 text-sm text-white"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-slate-50 text-slate-800">
-      {/* ── Fixed Sidebar ── */}
+      {/* Sidebar */}
       <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-slate-200 bg-white shadow-sm">
         <div
-          className="flex cursor-pointer items-center gap-2.5 border-b border-slate-100 px-5 py-5 transition-all duration-200 hover:bg-slate-50"
+          className="flex cursor-pointer items-center gap-2.5 border-b border-slate-100 px-5 py-5 hover:bg-slate-50"
           onClick={() => navigate("/manager-dashboard")}
         >
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-teal-600 to-teal-700 text-white shadow-md transition-transform hover:scale-105">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-teal-600 to-teal-700 text-white shadow-md">
             <Home className="h-5 w-5" />
           </div>
           <div>
@@ -206,23 +457,24 @@ const ManagerDashboard = () => {
               <ul className="space-y-1">
                 {group.items.map((item) => {
                   const Icon = item.icon;
+                  const isActive = location.pathname === item.path;
                   return (
                     <li key={item.label}>
                       <button
                         onClick={() => navigate(item.path)}
-                        className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
-                          item.active
+                        className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
+                          isActive
                             ? "bg-teal-50 text-teal-700 shadow-sm"
                             : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                         }`}
                       >
                         <Icon
-                          className={`h-4.5 w-4.5 transition-colors ${
-                            item.active ? "text-teal-600" : "text-slate-400"
+                          className={`h-4.5 w-4.5 ${
+                            isActive ? "text-teal-600" : "text-slate-400"
                           }`}
                         />
                         <span>{item.label}</span>
-                        {item.active && (
+                        {isActive && (
                           <ChevronRight className="ml-auto h-4 w-4" />
                         )}
                       </button>
@@ -244,7 +496,7 @@ const ManagerDashboard = () => {
         </div>
       </aside>
 
-      {/* ── Main Content ── */}
+      {/* Main */}
       <div className="ml-64 flex flex-1 flex-col">
         <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white/80 px-8 py-4 backdrop-blur-sm">
           <div className="flex items-center gap-3">
@@ -260,32 +512,14 @@ const ManagerDashboard = () => {
           </div>
 
           <div className="flex items-center gap-4">
-            <div className="relative hidden sm:block">
-              <input
-                type="text"
-                placeholder="Search properties, rooms, residents..."
-                className="w-72 rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-4 text-sm outline-none transition-all focus:border-teal-400 focus:ring-2 focus:ring-teal-100 focus:bg-white"
-              />
-              <svg
-                className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                />
-              </svg>
-            </div>
-            <button className="relative rounded-lg p-2 text-slate-500 transition-all hover:bg-slate-100 hover:text-slate-700">
+            <button className="relative rounded-lg p-2 text-slate-500 hover:bg-slate-100">
               <Bell className="h-5 w-5" />
-              <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+              {attentionItems.length > 0 && (
+                <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />
+              )}
             </button>
-            <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 transition-all hover:bg-slate-100">
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-teal-500 to-teal-600 text-xs font-semibold text-white shadow-sm">
+            <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-teal-500 to-teal-600 text-xs font-semibold text-white">
                 DB
               </div>
               <div className="hidden sm:block">
@@ -300,10 +534,10 @@ const ManagerDashboard = () => {
 
         <main className="flex-1 p-8">
           {/* Greeting */}
-          <div className="mb-6 flex items-center justify-between">
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
             <div>
               <h1 className="text-2xl font-bold text-slate-900">
-                Good evening, Darshana 👋
+                {getGreeting()}, Darshana 👋
               </h1>
               <p className="mt-1 text-sm text-slate-500">
                 {hasProperties
@@ -315,13 +549,11 @@ const ManagerDashboard = () => {
               {hasProperties && (
                 <select
                   className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:border-teal-400"
-                  value={currentPropertyIndex}
-                  onChange={(e) =>
-                    setCurrentPropertyIndex(Number(e.target.value))
-                  }
+                  value={selectedPropertyId || ""}
+                  onChange={(e) => setSelectedPropertyId(e.target.value)}
                 >
-                  {properties.map((p, idx) => (
-                    <option key={p.id} value={idx}>
+                  {properties.map((p) => (
+                    <option key={p.id} value={p.id}>
                       {p.name}
                     </option>
                   ))}
@@ -337,14 +569,14 @@ const ManagerDashboard = () => {
             </div>
           </div>
 
-          {/* Stats Cards */}
+          {/* Stats */}
           <div className="mb-8 grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
             {stats.map((stat) => {
               const Icon = stat.icon;
               return (
                 <div
                   key={stat.label}
-                  className="group rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-all duration-300 hover:shadow-lg hover:border-slate-300"
+                  className="group rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-slate-300 hover:shadow-lg"
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
@@ -371,7 +603,7 @@ const ManagerDashboard = () => {
                       </div>
                     </div>
                     <div
-                      className={`flex h-12 w-12 items-center justify-center rounded-lg transition-transform duration-300 group-hover:scale-110 ${stat.color}`}
+                      className={`flex h-12 w-12 items-center justify-center rounded-lg ${stat.color}`}
                     >
                       <Icon className="h-6 w-6" />
                     </div>
@@ -381,398 +613,456 @@ const ManagerDashboard = () => {
             })}
           </div>
 
-          {/* Property Highlight OR Empty State */}
-          {hasProperties && currentProperty ? (
-            <div className="mb-8 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg transition-all duration-300 hover:shadow-xl">
-              <div className="flex flex-col lg:flex-row">
-                <div className="relative flex h-64 w-full items-center justify-center overflow-hidden bg-gradient-to-br from-teal-100 via-emerald-50 to-slate-100 lg:h-auto lg:w-2/5">
-                  {currentProperty.coverUrl ? (
-                    <img
-                      src={currentProperty.coverUrl}
-                      alt={currentProperty.name}
-                      className="absolute inset-0 h-full w-full object-cover"
-                    />
-                  ) : (
-                    <Building2 className="relative z-10 h-16 w-16 text-teal-300" />
-                  )}
+         {/* Property overview or empty */}
+{hasProperties && currentProperty ? (
+  <div className="mb-8 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg transition-all duration-300 hover:shadow-xl">
+    <div className="flex flex-col lg:flex-row">
+      {/* LEFT: Cover / placeholder — always visible */}
+      <div className="relative flex h-56 w-full shrink-0 items-center justify-center overflow-hidden bg-gradient-to-br from-teal-100 via-emerald-50 to-slate-100 lg:h-auto lg:min-h-[240px] lg:w-2/5">
+        {currentProperty.coverUrl ? (
+          <img
+            src={currentProperty.coverUrl}
+            alt={currentProperty.name}
+            className="absolute inset-0 h-full w-full object-cover"
+            onError={(e) => {
+              e.currentTarget.style.display = "none";
+            }}
+          />
+        ) : null}
 
-                  {properties.length > 1 && (
-                    <>
-                      <div className="absolute inset-0 z-20 flex items-center justify-between px-4">
-                        <button
-                          onClick={prevProperty}
-                          className="rounded-full bg-white/80 p-2 shadow-lg transition-all hover:bg-white hover:shadow-xl"
-                        >
-                          <ChevronLeft className="h-5 w-5 text-slate-700" />
-                        </button>
-                        <button
-                          onClick={nextProperty}
-                          className="rounded-full bg-white/80 p-2 shadow-lg transition-all hover:bg-white hover:shadow-xl"
-                        >
-                          <ChevronRight className="h-5 w-5 text-slate-700" />
-                        </button>
-                      </div>
-                      <div className="absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 gap-1.5">
-                        {properties.map((_, idx) => (
-                          <button
-                            key={idx}
-                            onClick={() => setCurrentPropertyIndex(idx)}
-                            className={`h-2 rounded-full transition-all duration-300 ${
-                              idx === currentPropertyIndex
-                                ? "w-6 bg-teal-600"
-                                : "w-2 bg-white/50 hover:bg-white/70"
-                            }`}
-                          />
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
+        {!currentProperty.coverUrl && (
+          <div className="relative z-10 flex flex-col items-center gap-2">
+            <Building2 className="h-16 w-16 text-teal-300" />
+            <span className="text-xs font-medium text-teal-600/70">
+              No cover photo
+            </span>
+          </div>
+        )}
 
-                <div className="flex flex-1 flex-col justify-between p-6">
-                  <div>
-                    <div className="flex items-start justify-between">
-                      <h2 className="text-xl font-bold text-slate-900">
-                        🏡 {currentProperty.name}
-                      </h2>
-                      <span className="rounded-full bg-teal-100 px-3 py-1 text-xs font-semibold text-teal-700">
-                        {currentProperty.type}
-                      </span>
-                    </div>
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/5 to-transparent" />
+      </div>
 
-                    <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-                      <div className="flex flex-col items-start gap-1">
-                        <span className="text-xs font-medium text-slate-400">
-                          LOCATION
-                        </span>
-                        <div className="flex items-center gap-2 text-sm text-slate-600">
-                          <MapPin className="h-4 w-4 text-teal-600" />
-                          {currentProperty.address}
-                        </div>
-                      </div>
-                      <div className="flex flex-col items-start gap-1">
-                        <span className="text-xs font-medium text-slate-400">
-                          TYPE
-                        </span>
-                        <div className="flex items-center gap-2 text-sm text-slate-600">
-                          <Home className="h-4 w-4 text-teal-600" />
-                          {currentProperty.type}
-                        </div>
-                      </div>
-                      <div className="flex flex-col items-start gap-1">
-                        <span className="text-xs font-medium text-slate-400">
-                          ROOMS
-                        </span>
-                        <div className="flex items-center gap-2 text-sm text-slate-600">
-                          <BedDouble className="h-4 w-4 text-teal-600" />
-                          {currentProperty.rooms} Rooms
-                        </div>
-                      </div>
-                      <div className="flex flex-col items-start gap-1">
-                        <span className="text-xs font-medium text-slate-400">
-                          CAPACITY
-                        </span>
-                        <div className="flex items-center gap-2 text-sm text-slate-600">
-                          <Users className="h-4 w-4 text-teal-600" />
-                          {currentProperty.totalCapacity ||
-                            currentProperty.rooms *
-                              (currentProperty.peoplePerRoom || 1)}
-                        </div>
-                      </div>
-                    </div>
+      {/* RIGHT: Details */}
+      <div className="flex flex-1 flex-col justify-between p-6">
+        <div>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <h2 className="text-xl font-bold text-slate-900">
+              🏡 {currentProperty.name}
+            </h2>
+            <span className="rounded-full bg-teal-100 px-3 py-1 text-xs font-semibold text-teal-700">
+              {currentProperty.type || "Property"}
+            </span>
+          </div>
 
-                    <div className="mt-6 flex items-center gap-3">
-                      <div>
-                        <p className="text-xs font-medium text-slate-400">
-                          TOTAL POTENTIAL RENT
-                        </p>
-                        <span className="text-2xl font-bold text-slate-900">
-                          ₹
-                          {(
-                            currentProperty.totalPotentialRent ||
-                            currentProperty.rooms * currentProperty.rent
-                          ).toLocaleString()}
-                        </span>
-                      </div>
-                    </div>
-
-                    {currentProperty.inviteCode && (
-                      <p className="mt-3 text-xs text-slate-500">
-                        Invite code:{" "}
-                        <span className="font-mono font-semibold text-teal-700">
-                          {currentProperty.inviteCode}
-                        </span>
-                      </p>
-                    )}
-                  </div>
-
-                  <button
-                    onClick={() => navigate("/property")}
-                    className="mt-5 flex w-fit items-center gap-2 rounded-lg bg-gradient-to-r from-teal-600 to-teal-700 px-4 py-2 text-sm font-medium text-white shadow-md transition-all hover:shadow-lg hover:from-teal-700 hover:to-teal-800"
-                  >
-                    View Property
-                    <ChevronRight className="h-4 w-4" />
-                  </button>
-                </div>
+          <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                Location
+              </span>
+              <div className="flex items-center gap-2 text-sm text-slate-700">
+                <MapPin className="h-4 w-4 shrink-0 text-teal-600" />
+                <span className="truncate">
+                  {currentProperty.address || "—"}
+                </span>
               </div>
             </div>
-          ) : (
-            <div className="mb-8 rounded-xl border border-dashed border-slate-300 bg-white p-12 text-center">
-              <Building2 className="mx-auto h-12 w-12 text-slate-300" />
-              <h3 className="mt-4 text-lg font-semibold text-slate-800">
-                No properties yet
-              </h3>
-              <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
-                Create your first property to see stats, occupancy, rent
-                overview and more on this dashboard.
-              </p>
-              <button
-                onClick={() => navigate("/property")}
-                className="mt-6 inline-flex items-center gap-2 rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-teal-700"
-              >
-                <Plus className="h-4 w-4" />
-                Create Your First Property
-              </button>
-            </div>
-          )}
 
-          {/* Middle Row: Rent Collection + Needs Attention (still mock) */}
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                Rooms
+              </span>
+              <div className="flex items-center gap-2 text-sm text-slate-700">
+                <BedDouble className="h-4 w-4 shrink-0 text-teal-600" />
+                {currentProperty.rooms || 0} Rooms
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                Capacity
+              </span>
+              <div className="flex items-center gap-2 text-sm text-slate-700">
+                <Users className="h-4 w-4 shrink-0 text-teal-600" />
+                {currentProperty.totalCapacity ||
+                  (currentProperty.rooms || 0) *
+                    (currentProperty.peoplePerRoom || 1)}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                Rent / Room
+              </span>
+              <div className="flex items-center gap-2 text-sm text-slate-700">
+                <DollarSign className="h-4 w-4 shrink-0 text-teal-600" />
+                {formatCurrency(currentProperty.rent)}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+              Expected Monthly Rent (This Property)
+            </p>
+            <p className="mt-1 text-2xl font-bold text-slate-900">
+              {formatCurrency(
+                currentProperty.totalPotentialRent ||
+                  (currentProperty.rooms || 0) * (currentProperty.rent || 0)
+              )}
+            </p>
+
+            {currentProperty.inviteCode && (
+              <p className="mt-2 text-xs text-slate-500">
+                Invite code:{" "}
+                <span className="rounded bg-teal-50 px-1.5 py-0.5 font-mono font-semibold text-teal-700">
+                  {currentProperty.inviteCode}
+                </span>
+              </p>
+            )}
+          </div>
+        </div>
+
+        <button
+          onClick={() => navigate("/property")}
+          className="mt-6 flex w-fit items-center gap-2 rounded-lg bg-gradient-to-r from-teal-600 to-teal-700 px-4 py-2.5 text-sm font-medium text-white shadow-md transition hover:from-teal-700 hover:to-teal-800 hover:shadow-lg"
+        >
+          View Property
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  </div>
+) : (
+  <div className="mb-8 rounded-xl border border-dashed border-slate-300 bg-white p-12 text-center">
+    <Building2 className="mx-auto h-12 w-12 text-slate-300" />
+    <h3 className="mt-4 text-lg font-semibold text-slate-800">
+      No properties yet
+    </h3>
+    <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
+      Create your first property to see live stats, occupancy, rent and
+      health score.
+    </p>
+    <button
+      onClick={() => navigate("/property")}
+      className="mt-6 inline-flex items-center gap-2 rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-teal-700"
+    >
+      <Plus className="h-4 w-4" />
+      Create Your First Property
+    </button>
+  </div>
+)}
+
+          {/* Rent summary + Needs Attention */}
           <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-3">
-            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-lg lg:col-span-2">
-              <div className="mb-6 flex items-center justify-between">
+            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm lg:col-span-2">
+              <div className="mb-5 flex items-center justify-between">
                 <div>
                   <h3 className="flex items-center gap-2 text-base font-semibold text-slate-800">
                     <TrendingUp className="h-5 w-5 text-teal-600" />
-                    Rent Collection Trend
+                    Rent Overview
                   </h3>
                   <p className="mt-1 text-xs text-slate-500">
-                    Last 5 months performance
+                    Across all properties this month
                   </p>
                 </div>
                 <div className="rounded-lg bg-emerald-50 px-3 py-1">
                   <p className="text-xs font-semibold text-emerald-700">
-                    ↑ 15% improvement
+                    {rentStats.collectionRate}% collected
                   </p>
                 </div>
               </div>
-              <div className="flex h-48 items-end justify-between gap-3 px-2">
-                {[
-                  { month: "Jul", h: "45%", collected: "₹18k" },
-                  { month: "Aug", h: "70%", collected: "₹28k" },
-                  { month: "Sep", h: "85%", collected: "₹34k" },
-                  { month: "Oct", h: "60%", collected: "₹24k" },
-                  { month: "Nov", h: "40%", collected: "₹16k" },
-                ].map((bar) => (
-                  <div
-                    key={bar.month}
-                    className="group flex flex-1 flex-col items-center gap-3"
-                  >
-                    <div
-                      className="w-full max-w-10 rounded-t-lg bg-gradient-to-t from-teal-600 to-teal-400 shadow-md transition-all group-hover:shadow-lg"
-                      style={{ height: bar.h }}
-                      title={bar.collected}
-                    />
-                    <span className="text-xs font-semibold text-slate-600">
-                      {bar.month}
-                    </span>
-                  </div>
-                ))}
+
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                <div className="rounded-lg bg-slate-50 p-3">
+                  <p className="text-xs text-slate-500">Expected</p>
+                  <p className="mt-1 text-lg font-bold text-slate-900">
+                    {formatCurrency(rentStats.expected)}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-emerald-50 p-3">
+                  <p className="text-xs text-emerald-700">Collected</p>
+                  <p className="mt-1 text-lg font-bold text-emerald-800">
+                    {formatCurrency(rentStats.collected)}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-amber-50 p-3">
+                  <p className="text-xs text-amber-700">Pending</p>
+                  <p className="mt-1 text-lg font-bold text-amber-800">
+                    {formatCurrency(rentStats.pending)}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-red-50 p-3">
+                  <p className="text-xs text-red-700">Overdue</p>
+                  <p className="mt-1 text-lg font-bold text-red-800">
+                    {formatCurrency(rentStats.overdue)}
+                  </p>
+                </div>
               </div>
-              <div className="mt-6 flex justify-between text-xs text-slate-500">
-                <span>₹0</span>
-                <span className="font-semibold">₹50k</span>
+
+              <div className="mt-5">
+                <div className="mb-1 flex justify-between text-xs text-slate-500">
+                  <span>Collection progress</span>
+                  <span>{rentStats.collectionRate}%</span>
+                </div>
+                <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-teal-500 to-teal-600 transition-all"
+                    style={{ width: `${Math.min(rentStats.collectionRate, 100)}%` }}
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-lg">
+            {/* Needs Attention */}
+            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="mb-4 flex items-center gap-2 text-base font-semibold text-slate-800">
                 <AlertCircle className="h-5 w-5 text-red-600" />
                 Needs Attention
               </h3>
-              <ul className="space-y-3">
-                <li className="flex items-center gap-3 rounded-lg border border-red-100 bg-red-50 px-3 py-3 transition-all hover:bg-red-100">
-                  <span className="h-3 w-3 animate-pulse rounded-full bg-red-500" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-red-900">
-                      Sita rent
-                    </p>
-                    <p className="text-xs text-red-700">
-                      ₹12,000 - Overdue 5 days
-                    </p>
-                  </div>
-                  <ChevronRight className="h-4 w-4 text-red-600" />
-                </li>
-                <li className="flex items-center gap-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-3 transition-all hover:bg-amber-100">
-                  <span className="h-3 w-3 animate-pulse rounded-full bg-amber-500" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-amber-900">
-                      Join request
-                    </p>
-                    <p className="text-xs text-amber-700">Awaiting approval</p>
-                  </div>
-                  <ChevronRight className="h-4 w-4 text-amber-600" />
-                </li>
-                <li className="flex items-center gap-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-3 transition-all hover:bg-amber-100">
-                  <span className="h-3 w-3 animate-pulse rounded-full bg-amber-500" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-amber-900">
-                      Bill pending
-                    </p>
-                    <p className="text-xs text-amber-700">Due within 2 days</p>
-                  </div>
-                  <ChevronRight className="h-4 w-4 text-amber-600" />
-                </li>
-              </ul>
+              {attentionItems.length === 0 ? (
+                <div className="rounded-lg bg-emerald-50 p-4 text-center">
+                  <CheckCircle2 className="mx-auto h-6 w-6 text-emerald-600" />
+                  <p className="mt-2 text-sm font-semibold text-emerald-900">
+                    Everything looks good
+                  </p>
+                  <p className="mt-1 text-xs text-emerald-700">
+                    No urgent issues need your attention.
+                  </p>
+                </div>
+              ) : (
+                <ul className="space-y-3">
+                  {attentionItems.slice(0, 5).map((item) => (
+                    <li key={item.id}>
+                      <button
+                        onClick={() => navigate(item.path)}
+                        className={`flex w-full items-center gap-3 rounded-lg border px-3 py-3 text-left transition ${
+                          item.severity === "high"
+                            ? "border-red-100 bg-red-50 hover:bg-red-100"
+                            : "border-amber-100 bg-amber-50 hover:bg-amber-100"
+                        }`}
+                      >
+                        <span
+                          className={`h-3 w-3 shrink-0 rounded-full ${
+                            item.severity === "high"
+                              ? "bg-red-500"
+                              : "bg-amber-500"
+                          }`}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p
+                            className={`text-sm font-semibold ${
+                              item.severity === "high"
+                                ? "text-red-900"
+                                : "text-amber-900"
+                            }`}
+                          >
+                            {item.title}
+                          </p>
+                          <p
+                            className={`text-xs ${
+                              item.severity === "high"
+                                ? "text-red-700"
+                                : "text-amber-700"
+                            }`}
+                          >
+                            {item.description}
+                          </p>
+                        </div>
+                        <ChevronRight
+                          className={`h-4 w-4 ${
+                            item.severity === "high"
+                              ? "text-red-600"
+                              : "text-amber-600"
+                          }`}
+                        />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
 
-          {/* Bottom Row */}
+          {/* Bottom row */}
           <div className="mb-8 grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-lg">
+            {/* Recent Rent */}
+            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="mb-4 flex items-center gap-2 text-base font-semibold text-slate-800">
                 <DollarSign className="h-5 w-5 text-teal-600" />
                 Recent Rent
               </h3>
-              <ul className="space-y-3">
-                {recentPayments.map((p) => (
-                  <li
-                    key={p.name}
-                    className="flex items-center justify-between rounded-lg bg-slate-50 p-3 transition-all hover:bg-slate-100"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-slate-800">{p.name}</p>
-                      <p className="text-xs text-slate-500">{p.daysAgo}</p>
-                    </div>
-                    <div className="ml-2 flex items-center gap-2">
-                      <span className="font-semibold text-slate-700">
-                        {p.amount}
-                      </span>
-                      {p.status === "paid" ? (
+              {rentStats.recentPayments.length === 0 ? (
+                <p className="py-6 text-center text-sm text-slate-400">
+                  No payments recorded yet.
+                </p>
+              ) : (
+                <ul className="space-y-3">
+                  {rentStats.recentPayments.map((p) => (
+                    <li
+                      key={p.id}
+                      className="flex items-center justify-between rounded-lg bg-slate-50 p-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-slate-800">{p.name}</p>
+                        <p className="text-xs text-slate-500">
+                          {p.propertyName}
+                        </p>
+                      </div>
+                      <div className="ml-2 flex items-center gap-2">
+                        <span className="font-semibold text-slate-700">
+                          {formatCurrency(p.amount)}
+                        </span>
                         <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-                      ) : (
-                        <Clock className="h-5 w-5 text-red-500" />
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
               <button
                 onClick={() => navigate("/rent")}
-                className="mt-4 text-xs font-semibold text-teal-600 transition-colors hover:text-teal-700"
+                className="mt-4 text-xs font-semibold text-teal-600 hover:text-teal-700"
               >
                 View All →
               </button>
             </div>
 
-            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-lg">
+            {/* Occupancy */}
+            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="mb-4 flex items-center gap-2 text-base font-semibold text-slate-800">
                 <BedDouble className="h-5 w-5 text-teal-600" />
                 Occupancy
+                {currentProperty && (
+                  <span className="ml-auto text-xs font-normal text-slate-400">
+                    {currentProperty.name}
+                  </span>
+                )}
               </h3>
-              <ul className="space-y-2.5">
-                {rooms.map((room) => (
-                  <li
-                    key={room.name}
-                    className="flex items-center gap-3 rounded-lg bg-slate-50 px-2 py-2 transition-all hover:bg-slate-100"
-                  >
-                    <span className="w-20 text-xs font-semibold text-slate-700">
-                      {room.name}
-                    </span>
-                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200">
-                      <div
-                        className={`h-full rounded-full transition-all ${
-                          room.status === "full"
-                            ? "bg-gradient-to-r from-emerald-500 to-emerald-600"
-                            : room.status === "partial"
-                            ? "bg-gradient-to-r from-amber-400 to-amber-500"
-                            : "bg-slate-300"
-                        }`}
-                        style={{ width: `${room.fill}%` }}
-                      />
-                    </div>
-                    <span className="w-16 text-right text-xs font-semibold text-slate-600">
-                      {room.status === "full"
-                        ? "Full"
-                        : room.status === "partial"
-                        ? "Partial"
-                        : "Empty"}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              {occupancyRooms.length === 0 ? (
+                <p className="py-6 text-center text-sm text-slate-400">
+                  No rooms yet.
+                </p>
+              ) : (
+                <ul className="space-y-2.5">
+                  {occupancyRooms.slice(0, 6).map((room) => (
+                    <li
+                      key={room.name}
+                      className="flex items-center gap-3 rounded-lg bg-slate-50 px-2 py-2"
+                    >
+                      <span className="w-20 text-xs font-semibold text-slate-700">
+                        {room.name}
+                      </span>
+                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200">
+                        <div
+                          className={`h-full rounded-full ${
+                            room.status === "full"
+                              ? "bg-gradient-to-r from-emerald-500 to-emerald-600"
+                              : room.status === "partial"
+                              ? "bg-gradient-to-r from-amber-400 to-amber-500"
+                              : "bg-slate-300"
+                          }`}
+                          style={{ width: `${room.fill}%` }}
+                        />
+                      </div>
+                      <span className="w-14 text-right text-xs font-semibold text-slate-600">
+                        {room.status === "full"
+                          ? "Full"
+                          : room.status === "partial"
+                          ? "Partial"
+                          : "Empty"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
 
-            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-lg">
+            {/* Health Score */}
+            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="mb-4 flex items-center gap-2 text-base font-semibold text-slate-800">
                 <CheckCircle2 className="h-5 w-5 text-teal-600" />
                 Health Score
               </h3>
               <div className="mb-4 text-center">
-                <p className="text-4xl font-bold text-slate-900">87%</p>
+                <p className="text-4xl font-bold text-slate-900">
+                  {healthScore.score}%
+                </p>
                 <p className="text-xs font-medium text-slate-500">
                   Overall Health
                 </p>
                 <div className="mx-auto mt-3 h-2.5 w-full max-w-40 overflow-hidden rounded-full bg-slate-200">
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-teal-500 to-teal-600"
-                    style={{ width: "87%" }}
+                    style={{ width: `${healthScore.score}%` }}
                   />
                 </div>
               </div>
               <ul className="space-y-2.5 text-sm">
                 <li className="flex items-center justify-between rounded-lg bg-slate-50 px-2.5 py-2">
                   <span className="text-slate-600">Rent</span>
-                  <span className="font-semibold text-emerald-600">✓ 92%</span>
-                </li>
-                <li className="flex items-center justify-between rounded-lg bg-slate-50 px-2.5 py-2">
-                  <span className="text-slate-600">Bills</span>
-                  <span className="font-semibold text-emerald-600">✓ 88%</span>
+                  <span className="font-semibold text-emerald-600">
+                    {healthScore.rentScore}%
+                  </span>
                 </li>
                 <li className="flex items-center justify-between rounded-lg bg-slate-50 px-2.5 py-2">
                   <span className="text-slate-600">Occupancy</span>
-                  <span className="font-semibold text-emerald-600">✓ 83%</span>
+                  <span className="font-semibold text-emerald-600">
+                    {healthScore.occupancyScore}%
+                  </span>
                 </li>
-                <li className="flex items-center justify-between rounded-lg bg-red-50 px-2.5 py-2">
-                  <span className="text-slate-600">Settlements</span>
-                  <span className="font-semibold text-red-600">⚠ 2</span>
+                <li className="flex items-center justify-between rounded-lg bg-slate-50 px-2.5 py-2">
+                  <span className="text-slate-600">Bills</span>
+                  <span className="font-semibold text-emerald-600">
+                    {healthScore.billsScore}%
+                  </span>
+                </li>
+                <li className="flex items-center justify-between rounded-lg bg-slate-50 px-2.5 py-2">
+                  <span className="text-slate-600">Overdue rent</span>
+                  <span
+                    className={`font-semibold ${
+                      rentStats.overdue > 0 ? "text-red-600" : "text-emerald-600"
+                    }`}
+                  >
+                    {rentStats.overdue > 0
+                      ? formatCurrency(rentStats.overdue)
+                      : "None"}
+                  </span>
                 </li>
               </ul>
             </div>
 
-            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-lg">
+            {/* Recent Activity */}
+            <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="mb-4 flex items-center gap-2 text-base font-semibold text-slate-800">
                 <Activity className="h-5 w-5 text-teal-600" />
                 Recent Activity
               </h3>
-              <ul className="space-y-4">
-                <li className="flex gap-3 rounded-lg bg-emerald-50 p-3 transition-all hover:bg-emerald-100">
-                  <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-emerald-900">
-                      Rent paid
-                    </p>
-                    <p className="text-xs text-emerald-700">10 mins ago</p>
-                  </div>
-                </li>
-                <li className="flex gap-3 rounded-lg bg-teal-50 p-3 transition-all hover:bg-teal-100">
-                  <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-teal-500" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-teal-900">
-                      New resident
-                    </p>
-                    <p className="text-xs text-teal-700">1 hour ago</p>
-                  </div>
-                </li>
-                <li className="flex gap-3 rounded-lg bg-amber-50 p-3 transition-all hover:bg-amber-100">
-                  <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-amber-500" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-amber-900">
-                      Bill added
-                    </p>
-                    <p className="text-xs text-amber-700">3 hours ago</p>
-                  </div>
-                </li>
-              </ul>
+              {recentActivities.length === 0 ? (
+                <p className="py-6 text-center text-sm text-slate-400">
+                  No activity yet.
+                </p>
+              ) : (
+                <ul className="space-y-3">
+                  {recentActivities.map((a) => (
+                    <li
+                      key={a.id}
+                      className="flex gap-3 rounded-lg bg-slate-50 p-3"
+                    >
+                      <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-teal-500" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-slate-800">
+                          {a.title}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {a.description || a.propertyName}
+                        </p>
+                        <p className="mt-0.5 text-xs text-slate-400">
+                          {a.time}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
 
@@ -783,28 +1073,19 @@ const ManagerDashboard = () => {
               Quick Actions
             </h3>
             <div className="flex flex-wrap gap-3">
-              <button
-                onClick={() => navigate("/property")}
-                className="flex items-center gap-2 rounded-lg border border-teal-200 bg-gradient-to-r from-teal-50 to-teal-100 px-4 py-2.5 text-sm font-semibold text-teal-700 transition-all hover:border-teal-300 hover:from-teal-100 hover:to-teal-200 hover:shadow-md"
-              >
-                <Plus className="h-4 w-4" />
-                Property
-              </button>
-              <button className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-gradient-to-r from-emerald-50 to-emerald-100 px-4 py-2.5 text-sm font-semibold text-emerald-700 transition-all hover:border-emerald-300 hover:from-emerald-100 hover:to-emerald-200 hover:shadow-md">
-                <Plus className="h-4 w-4" />
-                Resident
-              </button>
-              <button
-                onClick={() => navigate("/rent")}
-                className="flex items-center gap-2 rounded-lg border border-cyan-200 bg-gradient-to-r from-cyan-50 to-cyan-100 px-4 py-2.5 text-sm font-semibold text-cyan-700 transition-all hover:border-cyan-300 hover:from-cyan-100 hover:to-cyan-200 hover:shadow-md"
-              >
-                <Plus className="h-4 w-4" />
-                Rent
-              </button>
-              <button className="flex items-center gap-2 rounded-lg border border-amber-200 bg-gradient-to-r from-amber-50 to-amber-100 px-4 py-2.5 text-sm font-semibold text-amber-700 transition-all hover:border-amber-300 hover:from-amber-100 hover:to-amber-200 hover:shadow-md">
-                <Plus className="h-4 w-4" />
-                Bill
-              </button>
+              {quickActions.map((action) => {
+                const Icon = action.icon;
+                return (
+                  <button
+                    key={action.label}
+                    onClick={() => navigate(action.path)}
+                    className="flex items-center gap-2 rounded-lg border border-teal-200 bg-gradient-to-r from-teal-50 to-teal-100 px-4 py-2.5 text-sm font-semibold text-teal-700 transition hover:border-teal-300 hover:shadow-md"
+                  >
+                    <Plus className="h-4 w-4" />
+                    {action.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </main>

@@ -27,7 +27,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { addProperty, updateProperty } from "../utils/propertyStorage";
-// ⚠️ If propertyStorage.js is in the same folder, use:
+// If propertyStorage.js is in the same folder, use:
 // import { addProperty, updateProperty } from "./propertyStorage";
 
 const PROPERTY_TYPES = [
@@ -50,11 +50,19 @@ const MAX_PHOTOS = 5;
 const MAX_FILE_SIZE_MB = 5;
 const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
-// Simulated "already taken" codes — replace with a real API call later.
 const TAKEN_CODES = ["GREENHOUSE", "ROOMSYNC", "TESTHOUSE", "KTMHOUSE"];
 
 const CODE_MIN = 6;
 const CODE_MAX = 12;
+
+/** Convert File → base64 data URL so it survives refresh & localStorage */
+const fileToDataUrl = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 
 /* ──────────────── Small building blocks ──────────────── */
 
@@ -177,9 +185,7 @@ const PropertyPreviewCard = ({ formData, photos }) => {
                 <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-full px-3 py-1.5">
                   <Users className="w-3.5 h-3.5" />
                   {formData.peoplePerRoom}{" "}
-                  {Number(formData.peoplePerRoom) === 1
-                    ? "person"
-                    : "people"}
+                  {Number(formData.peoplePerRoom) === 1 ? "person" : "people"}
                   /room
                 </span>
               )}
@@ -227,7 +233,7 @@ const sanitizeCode = (raw) =>
     .slice(0, CODE_MAX);
 
 const generateRandomCode = () => {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no ambiguous 0/O/1/I
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let suffix = "";
   for (let i = 0; i < 4; i++) {
     suffix += chars[Math.floor(Math.random() * chars.length)];
@@ -247,8 +253,6 @@ const Property = () => {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
 
-  /* ──────────────── Property form state ──────────────── */
-
   const [formData, setFormData] = useState({
     name: "",
     address: "",
@@ -258,28 +262,22 @@ const Property = () => {
     peoplePerRoom: "",
     rent: "",
   });
-  // photos: [{ file, url }]
   const [photos, setPhotos] = useState([]);
   const [errors, setErrors] = useState({});
   const [touched, setTouched] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
-  // stage: "form" -> "success" -> "invite" -> "inviteConfirm"
   const [stage, setStage] = useState("form");
   const [createdProperty, setCreatedProperty] = useState(null);
 
-  /* ──────────────── Invitation code state ──────────────── */
-
   const [inviteCode, setInviteCode] = useState("");
   const [codeFormatError, setCodeFormatError] = useState("");
-  // availability: "idle" | "checking" | "available" | "taken"
   const [availability, setAvailability] = useState("idle");
   const [isSavingCode, setIsSavingCode] = useState(false);
   const [savedCode, setSavedCode] = useState("");
   const [isCopied, setIsCopied] = useState(false);
 
-  // Revoke object URLs on unmount to avoid memory leaks
   useEffect(() => {
     return () => {
       photos.forEach((p) => URL.revokeObjectURL(p.url));
@@ -287,7 +285,6 @@ const Property = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Debounced availability check whenever the code changes and is well-formed
   useEffect(() => {
     const formatError = validateCodeFormat(inviteCode);
     setCodeFormatError(formatError);
@@ -305,8 +302,6 @@ const Property = () => {
 
     return () => clearTimeout(timer);
   }, [inviteCode]);
-
-  /* ──────────────── Property form validation ──────────────── */
 
   const validate = (data) => {
     const next = {};
@@ -366,8 +361,6 @@ const Property = () => {
     setErrors(validate(formData));
   };
 
-  /* ──────────────── Photo handling ──────────────── */
-
   const addFiles = (fileList) => {
     const incoming = Array.from(fileList);
     if (incoming.length === 0) return;
@@ -399,7 +392,7 @@ const Property = () => {
 
   const handleFileInputChange = (e) => {
     addFiles(e.target.files);
-    e.target.value = ""; // allow re-selecting the same file
+    e.target.value = "";
   };
 
   const handleRemovePhoto = (index) => {
@@ -426,7 +419,7 @@ const Property = () => {
     setIsDragging(false);
   };
 
-  /* ──────────────── Submit property ──────────────── */
+  /* ──────────────── Submit property (FIXED – base64 cover) ──────────────── */
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -447,8 +440,17 @@ const Property = () => {
     setIsLoading(true);
 
     try {
-      // Replace with your real API call later
       await new Promise((resolve) => setTimeout(resolve, 1200));
+
+      // Convert first photo to base64 so it survives refresh
+      let coverUrl = null;
+      if (photos[0]?.file) {
+        try {
+          coverUrl = await fileToDataUrl(photos[0].file);
+        } catch {
+          coverUrl = null;
+        }
+      }
 
       const newProperty = {
         id: Date.now(),
@@ -460,18 +462,31 @@ const Property = () => {
         peoplePerRoom: Number(formData.peoplePerRoom),
         rent: Number(formData.rent),
         photoCount: photos.length,
-        coverUrl: photos[0]?.url || null, // object URLs don't survive refresh
+        coverUrl, // base64 data URL
         inviteCode: null,
         createdAt: new Date().toISOString(),
         totalCapacity:
           Number(formData.rooms) * Number(formData.peoplePerRoom),
         totalPotentialRent:
           Number(formData.rooms) * Number(formData.rent),
+        roomsList: [],
+        residents: [],
+        bills: [],
+        expenses: [],
+        chores: [],
+        activities: [
+          {
+            id: `act-${Date.now()}`,
+            type: "property",
+            title: "Property created",
+            description: `${formData.name.trim()} was added`,
+            time: "Just now",
+          },
+        ],
+        occupiedCapacity: 0,
       };
 
-      // Persist so Dashboard can read it
       addProperty(newProperty);
-
       setCreatedProperty(newProperty);
       setStage("success");
     } catch (err) {
@@ -482,8 +497,6 @@ const Property = () => {
       setIsLoading(false);
     }
   };
-
-  /* ──────────────── Invitation code handlers ──────────────── */
 
   const handleCodeChange = (e) => {
     setInviteCode(sanitizeCode(e.target.value));
@@ -500,10 +513,8 @@ const Property = () => {
     if (!canSaveCode) return;
     setIsSavingCode(true);
     try {
-      // Replace with your real API call later
       await new Promise((resolve) => setTimeout(resolve, 900));
 
-      // Attach invite code to the property we just created
       if (createdProperty?.id) {
         updateProperty(createdProperty.id, { inviteCode });
       }
@@ -521,7 +532,7 @@ const Property = () => {
       setIsCopied(true);
       setTimeout(() => setIsCopied(false), 1800);
     } catch {
-      // Clipboard API unavailable — silently ignore.
+      // ignore
     }
   };
 
@@ -558,17 +569,14 @@ const Property = () => {
     return (
       <div className="min-h-screen bg-[#F6F8F7] flex flex-col">
         <TopBar />
-
         <div className="px-6 pt-8">
           <SetupProgress currentKey="invite" />
         </div>
-
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="w-full max-w-md rounded-3xl border border-slate-200/80 bg-white p-8 sm:p-10 shadow-[0_24px_70px_-25px_rgba(15,23,42,0.22)] text-center animate-[fadeIn_0.5s_ease-out]">
             <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-teal-50 flex items-center justify-center">
               <CheckCircle2 className="w-8 h-8 text-teal-600" />
             </div>
-
             <h2 className="text-2xl font-bold text-slate-900 mb-2">
               Your property is ready! 🎉
             </h2>
@@ -576,7 +584,6 @@ const Property = () => {
               Property created. Next, create an invitation code so roommates
               can find and request to join.
             </p>
-
             <div className="rounded-2xl border border-slate-200 bg-slate-50/60 overflow-hidden text-left mb-8">
               {createdProperty.coverUrl && (
                 <img
@@ -614,9 +621,7 @@ const Property = () => {
                   <Users className="w-5 h-5 text-slate-400 flex-shrink-0" />
                   <p className="text-sm text-slate-600">
                     {createdProperty.peoplePerRoom}{" "}
-                    {createdProperty.peoplePerRoom === 1
-                      ? "Person"
-                      : "People"}{" "}
+                    {createdProperty.peoplePerRoom === 1 ? "Person" : "People"}{" "}
                     per room
                   </p>
                 </div>
@@ -636,7 +641,6 @@ const Property = () => {
                 </div>
               </div>
             </div>
-
             <button
               onClick={() => setStage("invite")}
               className="group w-full flex items-center justify-center gap-2 bg-teal-600 hover:bg-teal-700 text-white font-semibold py-3.5 px-4 rounded-2xl transition-all duration-200 shadow-lg shadow-teal-600/25 hover:shadow-teal-600/40 hover:-translate-y-0.5 active:translate-y-0"
@@ -646,7 +650,6 @@ const Property = () => {
             </button>
           </div>
         </div>
-
         <style>{`
           @keyframes fadeIn {
             from { opacity: 0; transform: translateY(8px); }
@@ -662,17 +665,14 @@ const Property = () => {
     return (
       <div className="min-h-screen bg-[#F6F8F7] flex flex-col">
         <TopBar />
-
         <div className="px-6 pt-8">
           <SetupProgress currentKey="invite" />
         </div>
-
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="w-full max-w-md rounded-3xl border border-slate-200/80 bg-white p-8 sm:p-10 shadow-[0_24px_70px_-25px_rgba(15,23,42,0.22)] text-center animate-[fadeIn_0.5s_ease-out]">
             <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-teal-50 flex items-center justify-center">
               <Lock className="w-8 h-8 text-teal-600" />
             </div>
-
             <h2 className="text-2xl font-bold text-slate-900 mb-2">
               Create Invitation Code
             </h2>
@@ -680,7 +680,6 @@ const Property = () => {
               Create a unique code that your roommates can use to find and
               request to join {createdProperty?.name || "your property"}.
             </p>
-
             <div className="text-left mb-1.5">
               <label
                 htmlFor="inviteCode"
@@ -732,7 +731,6 @@ const Property = () => {
                   )}
                 </div>
               </div>
-
               <div className="mt-1.5 min-h-[1.25rem] text-left">
                 {inviteCode && codeFormatError ? (
                   <p className="flex items-center gap-1 text-sm text-red-600">
@@ -754,7 +752,6 @@ const Property = () => {
                 ) : null}
               </div>
             </div>
-
             <ul className="text-left space-y-1.5 mt-4 mb-7">
               {codeChecklist.map((item) => (
                 <li
@@ -772,7 +769,6 @@ const Property = () => {
                 </li>
               ))}
             </ul>
-
             <button
               onClick={handleSaveCode}
               disabled={!canSaveCode}
@@ -790,13 +786,11 @@ const Property = () => {
                 </>
               )}
             </button>
-
             <div className="flex items-center gap-3 my-6">
               <div className="h-px flex-1 bg-slate-200" />
               <span className="text-xs font-medium text-slate-400">OR</span>
               <div className="h-px flex-1 bg-slate-200" />
             </div>
-
             <p className="text-sm text-slate-500 mb-3">
               Don't want to create one?
             </p>
@@ -808,14 +802,12 @@ const Property = () => {
               <Sparkles className="w-4 h-4 text-teal-600" />
               Generate a Code
             </button>
-
             <p className="flex items-center justify-center gap-1.5 text-xs text-slate-400 mt-7">
               <Lock className="w-3.5 h-3.5" />
               Only people with this code can find your property.
             </p>
           </div>
         </div>
-
         <style>{`
           @keyframes fadeIn {
             from { opacity: 0; transform: translateY(8px); }
@@ -831,22 +823,18 @@ const Property = () => {
     return (
       <div className="min-h-screen bg-[#F6F8F7] flex flex-col">
         <TopBar />
-
         <div className="px-6 pt-8">
           <SetupProgress currentKey="rooms" />
         </div>
-
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="w-full max-w-md rounded-3xl border border-slate-200/80 bg-white p-8 sm:p-10 shadow-[0_24px_70px_-25px_rgba(15,23,42,0.22)] text-center animate-[fadeIn_0.5s_ease-out]">
             <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-teal-50 flex items-center justify-center">
               <CheckCircle2 className="w-8 h-8 text-teal-600" />
             </div>
-
             <h2 className="text-2xl font-bold text-slate-900 mb-2">
               Invitation Code Created
             </h2>
             <p className="text-slate-500 mb-6">Your roommates can use:</p>
-
             <button
               type="button"
               onClick={handleCopyCode}
@@ -865,12 +853,10 @@ const Property = () => {
             <p className="text-xs text-slate-400 mb-6">
               {isCopied ? "Copied to clipboard!" : "Tap the code to copy it"}
             </p>
-
             <p className="text-sm text-slate-500 mb-8">
               Share this code with the people you want to invite to your
               property.
             </p>
-
             <button
               onClick={handleContinueToRooms}
               className="group w-full flex items-center justify-center gap-2 bg-teal-600 hover:bg-teal-700 text-white font-semibold py-3.5 px-4 rounded-2xl transition-all duration-200 shadow-lg shadow-teal-600/25 hover:shadow-teal-600/40 hover:-translate-y-0.5 active:translate-y-0"
@@ -880,7 +866,6 @@ const Property = () => {
             </button>
           </div>
         </div>
-
         <style>{`
           @keyframes fadeIn {
             from { opacity: 0; transform: translateY(8px); }
@@ -895,7 +880,6 @@ const Property = () => {
   return (
     <div className="min-h-screen bg-[#F6F8F7] flex flex-col">
       <TopBar />
-
       <div className="flex-1 flex flex-col items-center p-6 sm:p-10">
         <div className="w-full max-w-5xl">
           <div className="text-center mb-8 animate-[fadeIn_0.5s_ease-out]">
@@ -922,7 +906,7 @@ const Property = () => {
               )}
 
               <form onSubmit={handleSubmit} noValidate className="space-y-8">
-                {/* ── Section: Property Information ── */}
+                {/* Property Information */}
                 <div>
                   <div className="flex items-center gap-2.5 mb-6">
                     <div className="w-9 h-9 rounded-xl bg-teal-50 flex items-center justify-center">
@@ -932,9 +916,7 @@ const Property = () => {
                       Property Information
                     </h2>
                   </div>
-
                   <div className="space-y-5">
-                    {/* Property Name */}
                     <div>
                       <label
                         htmlFor="name"
@@ -974,7 +956,6 @@ const Property = () => {
                       )}
                     </div>
 
-                    {/* Property Address */}
                     <div>
                       <label
                         htmlFor="address"
@@ -1014,7 +995,6 @@ const Property = () => {
                       )}
                     </div>
 
-                    {/* Type + Rooms */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <label
@@ -1097,7 +1077,6 @@ const Property = () => {
                       </div>
                     </div>
 
-                    {/* Description */}
                     <div>
                       <label
                         htmlFor="description"
@@ -1127,7 +1106,7 @@ const Property = () => {
                   </div>
                 </div>
 
-                {/* ── Section: Property Photos ── */}
+                {/* Property Photos */}
                 <div className="pt-8 border-t border-slate-100">
                   <div className="flex items-center gap-2.5 mb-1">
                     <div className="w-9 h-9 rounded-xl bg-teal-50 flex items-center justify-center">
@@ -1169,7 +1148,6 @@ const Property = () => {
                           </button>
                         </div>
                       ))}
-
                       {photos.length < MAX_PHOTOS && (
                         <button
                           type="button"
@@ -1232,7 +1210,7 @@ const Property = () => {
                   )}
                 </div>
 
-                {/* ── Section: Room Information ── */}
+                {/* Room Information */}
                 <div className="pt-8 border-t border-slate-100">
                   <div className="flex items-center gap-2.5 mb-1">
                     <div className="w-9 h-9 rounded-xl bg-teal-50 flex items-center justify-center">
@@ -1245,7 +1223,6 @@ const Property = () => {
                   <p className="text-xs text-slate-500 mb-5 ml-11">
                     How many people can live in each room?
                   </p>
-
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label
@@ -1290,7 +1267,6 @@ const Property = () => {
                         </p>
                       )}
                     </div>
-
                     <div>
                       <label
                         htmlFor="rent"
@@ -1335,7 +1311,6 @@ const Property = () => {
                       )}
                     </div>
                   </div>
-
                   <div className="flex items-start gap-2 mt-4 rounded-xl bg-teal-50/70 border border-teal-100 px-3.5 py-2.5">
                     <Info className="h-4 w-4 text-teal-600 mt-0.5 flex-shrink-0" />
                     <p className="text-xs text-teal-800">
@@ -1345,7 +1320,6 @@ const Property = () => {
                   </div>
                 </div>
 
-                {/* Submit */}
                 <button
                   type="submit"
                   disabled={isLoading}
@@ -1385,19 +1359,16 @@ const Property = () => {
               </form>
             </div>
 
-            {/* Live preview */}
             <div className="animate-[fadeIn_0.5s_ease-out] hidden lg:block">
               <PropertyPreviewCard formData={formData} photos={photos} />
             </div>
           </div>
 
-          {/* Mobile preview */}
           <div className="lg:hidden mt-6 animate-[fadeIn_0.5s_ease-out]">
             <PropertyPreviewCard formData={formData} photos={photos} />
           </div>
         </div>
       </div>
-
       <style>{`
         @keyframes fadeIn {
           from { opacity: 0; transform: translateY(8px); }
