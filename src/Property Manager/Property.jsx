@@ -26,6 +26,9 @@ import {
   Sparkles,
   Loader2,
 } from "lucide-react";
+import { addProperty, updateProperty } from "../utils/propertyStorage";
+// ⚠️ If propertyStorage.js is in the same folder, use:
+// import { addProperty, updateProperty } from "./propertyStorage";
 
 const PROPERTY_TYPES = [
   "Shared House",
@@ -79,7 +82,11 @@ const SetupProgress = ({ currentKey }) => {
               </div>
               <span
                 className={`text-[11px] font-medium whitespace-nowrap ${
-                  isCurrent ? "text-teal-700" : isDone ? "text-slate-600" : "text-slate-400"
+                  isCurrent
+                    ? "text-teal-700"
+                    : isDone
+                    ? "text-slate-600"
+                    : "text-slate-400"
                 }`}
               >
                 {s.label}
@@ -117,7 +124,8 @@ const TopBar = () => (
 );
 
 const PropertyPreviewCard = ({ formData, photos }) => {
-  const hasCore = formData.name || formData.address || formData.type || formData.rooms;
+  const hasCore =
+    formData.name || formData.address || formData.type || formData.rooms;
 
   return (
     <div className="rounded-3xl border border-slate-200/80 bg-white overflow-hidden shadow-[0_24px_70px_-25px_rgba(15,23,42,0.22)] sticky top-6">
@@ -161,14 +169,18 @@ const PropertyPreviewCard = ({ formData, photos }) => {
               {formData.rooms && (
                 <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-full px-3 py-1.5">
                   <BedDouble className="w-3.5 h-3.5" />
-                  {formData.rooms} {Number(formData.rooms) === 1 ? "room" : "rooms"}
+                  {formData.rooms}{" "}
+                  {Number(formData.rooms) === 1 ? "room" : "rooms"}
                 </span>
               )}
               {formData.peoplePerRoom && (
                 <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-full px-3 py-1.5">
                   <Users className="w-3.5 h-3.5" />
                   {formData.peoplePerRoom}{" "}
-                  {Number(formData.peoplePerRoom) === 1 ? "person" : "people"}/room
+                  {Number(formData.peoplePerRoom) === 1
+                    ? "person"
+                    : "people"}
+                  /room
                 </span>
               )}
               {formData.rent && (
@@ -208,7 +220,6 @@ const PropertyPreviewCard = ({ formData, photos }) => {
 
 /* ──────────────── Code helpers ──────────────── */
 
-// Uppercase, strip anything that isn't A-Z or 0-9, cap length.
 const sanitizeCode = (raw) =>
   raw
     .toUpperCase()
@@ -437,16 +448,10 @@ const Property = () => {
 
     try {
       // Replace with your real API call later
-      // await api.createProperty({
-      //   ...formData,
-      //   rooms: Number(formData.rooms),
-      //   peoplePerRoom: Number(formData.peoplePerRoom),
-      //   rent: Number(formData.rent),
-      //   images: photos.map((p) => p.file),
-      // });
       await new Promise((resolve) => setTimeout(resolve, 1200));
 
-      setCreatedProperty({
+      const newProperty = {
+        id: Date.now(),
         name: formData.name.trim(),
         address: formData.address.trim(),
         type: formData.type,
@@ -455,8 +460,19 @@ const Property = () => {
         peoplePerRoom: Number(formData.peoplePerRoom),
         rent: Number(formData.rent),
         photoCount: photos.length,
-        coverUrl: photos[0]?.url || null,
-      });
+        coverUrl: photos[0]?.url || null, // object URLs don't survive refresh
+        inviteCode: null,
+        createdAt: new Date().toISOString(),
+        totalCapacity:
+          Number(formData.rooms) * Number(formData.peoplePerRoom),
+        totalPotentialRent:
+          Number(formData.rooms) * Number(formData.rent),
+      };
+
+      // Persist so Dashboard can read it
+      addProperty(newProperty);
+
+      setCreatedProperty(newProperty);
       setStage("success");
     } catch (err) {
       setErrors({
@@ -477,15 +493,21 @@ const Property = () => {
     setInviteCode(generateRandomCode());
   };
 
-  const canSaveCode = !codeFormatError && availability === "available" && !isSavingCode;
+  const canSaveCode =
+    !codeFormatError && availability === "available" && !isSavingCode;
 
   const handleSaveCode = async () => {
     if (!canSaveCode) return;
     setIsSavingCode(true);
     try {
       // Replace with your real API call later
-      // await api.saveInvitationCode({ propertyId, code: inviteCode });
       await new Promise((resolve) => setTimeout(resolve, 900));
+
+      // Attach invite code to the property we just created
+      if (createdProperty?.id) {
+        updateProperty(createdProperty.id, { inviteCode });
+      }
+
       setSavedCode(inviteCode);
       setStage("inviteConfirm");
     } finally {
@@ -514,7 +536,10 @@ const Property = () => {
   const peopleInvalid = Boolean(touched.peoplePerRoom && errors.peoplePerRoom);
   const rentInvalid = Boolean(touched.rent && errors.rent);
   const hasCoreDetails =
-    formData.name.trim() && formData.address.trim() && formData.type && formData.rooms;
+    formData.name.trim() &&
+    formData.address.trim() &&
+    formData.type &&
+    formData.rooms;
 
   const codeChecklist = [
     {
@@ -589,13 +614,17 @@ const Property = () => {
                   <Users className="w-5 h-5 text-slate-400 flex-shrink-0" />
                   <p className="text-sm text-slate-600">
                     {createdProperty.peoplePerRoom}{" "}
-                    {createdProperty.peoplePerRoom === 1 ? "Person" : "People"} per room
+                    {createdProperty.peoplePerRoom === 1
+                      ? "Person"
+                      : "People"}{" "}
+                    per room
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
                   <Wallet className="w-5 h-5 text-slate-400 flex-shrink-0" />
                   <p className="text-sm text-slate-600">
-                    Rs. {createdProperty.rent.toLocaleString("en-IN")} / room / month
+                    Rs. {createdProperty.rent.toLocaleString("en-IN")} / room /
+                    month
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -704,7 +733,6 @@ const Property = () => {
                 </div>
               </div>
 
-              {/* Availability / format feedback */}
               <div className="mt-1.5 min-h-[1.25rem] text-left">
                 {inviteCode && codeFormatError ? (
                   <p className="flex items-center gap-1 text-sm text-red-600">
@@ -727,7 +755,6 @@ const Property = () => {
               </div>
             </div>
 
-            {/* Checklist */}
             <ul className="text-left space-y-1.5 mt-4 mb-7">
               {codeChecklist.map((item) => (
                 <li
@@ -869,10 +896,8 @@ const Property = () => {
     <div className="min-h-screen bg-[#F6F8F7] flex flex-col">
       <TopBar />
 
-      {/* Main content */}
       <div className="flex-1 flex flex-col items-center p-6 sm:p-10">
         <div className="w-full max-w-5xl">
-          {/* Progress + Heading */}
           <div className="text-center mb-8 animate-[fadeIn_0.5s_ease-out]">
             <SetupProgress currentKey={hasCoreDetails ? "photos" : "details"} />
             <h1 className="text-3xl font-bold text-slate-900 mb-2 mt-6">
@@ -885,7 +910,6 @@ const Property = () => {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-6 items-start">
-            {/* Form card */}
             <div className="rounded-3xl border border-slate-200/80 bg-white p-7 sm:p-9 shadow-[0_24px_70px_-25px_rgba(15,23,42,0.22)] animate-[fadeIn_0.5s_ease-out] space-y-8">
               {errors.submit && (
                 <div
@@ -990,9 +1014,8 @@ const Property = () => {
                       )}
                     </div>
 
-                    {/* Type + Rooms (side by side) */}
+                    {/* Type + Rooms */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {/* Property Type */}
                       <div>
                         <label
                           htmlFor="type"
@@ -1011,7 +1034,9 @@ const Property = () => {
                             typeInvalid
                               ? "border-red-300 bg-white focus:border-red-500 focus:ring-red-500/20"
                               : "border-slate-200 bg-slate-50/50 focus:border-teal-500 focus:ring-teal-500/10"
-                          } ${!formData.type ? "text-slate-400" : "text-slate-800"}`}
+                          } ${
+                            !formData.type ? "text-slate-400" : "text-slate-800"
+                          }`}
                         >
                           <option value="" disabled>
                             Select type
@@ -1030,7 +1055,6 @@ const Property = () => {
                         )}
                       </div>
 
-                      {/* Number of Rooms */}
                       <div>
                         <label
                           htmlFor="rooms"
@@ -1080,7 +1104,9 @@ const Property = () => {
                         className="block text-sm font-medium text-slate-700 mb-1.5"
                       >
                         Description{" "}
-                        <span className="text-slate-400 font-normal">(optional)</span>
+                        <span className="text-slate-400 font-normal">
+                          (optional)
+                        </span>
                       </label>
                       <div className="relative">
                         <div className="absolute top-3.5 left-3.5 pointer-events-none">
@@ -1151,7 +1177,9 @@ const Property = () => {
                           className="aspect-square rounded-xl border-2 border-dashed border-slate-200 hover:border-teal-400 hover:bg-teal-50/40 flex flex-col items-center justify-center text-slate-400 hover:text-teal-600 transition-colors"
                         >
                           <Plus className="w-5 h-5 mb-1" />
-                          <span className="text-[11px] font-medium">Add photo</span>
+                          <span className="text-[11px] font-medium">
+                            Add photo
+                          </span>
                         </button>
                       )}
                     </div>
@@ -1219,7 +1247,6 @@ const Property = () => {
                   </p>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {/* People per Room */}
                     <div>
                       <label
                         htmlFor="peoplePerRoom"
@@ -1264,7 +1291,6 @@ const Property = () => {
                       )}
                     </div>
 
-                    {/* Monthly Rent */}
                     <div>
                       <label
                         htmlFor="rent"
@@ -1365,7 +1391,7 @@ const Property = () => {
             </div>
           </div>
 
-          {/* Mobile preview (shown below form on small screens) */}
+          {/* Mobile preview */}
           <div className="lg:hidden mt-6 animate-[fadeIn_0.5s_ease-out]">
             <PropertyPreviewCard formData={formData} photos={photos} />
           </div>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Home,
@@ -26,10 +26,34 @@ import {
   TrendingDown,
   Activity,
 } from "lucide-react";
+import { loadProperties } from "../utils/propertyStorage"; // adjust path if needed
 
 const ManagerDashboard = () => {
   const navigate = useNavigate();
   const [currentPropertyIndex, setCurrentPropertyIndex] = useState(0);
+  const [properties, setProperties] = useState([]);
+
+  // Load properties whenever the dashboard mounts
+  useEffect(() => {
+    setProperties(loadProperties());
+  }, []);
+
+  const hasProperties = properties.length > 0;
+  const currentProperty = hasProperties
+    ? properties[currentPropertyIndex]
+    : null;
+
+  const nextProperty = () => {
+    if (!hasProperties) return;
+    setCurrentPropertyIndex((prev) => (prev + 1) % properties.length);
+  };
+
+  const prevProperty = () => {
+    if (!hasProperties) return;
+    setCurrentPropertyIndex((prev) =>
+      prev === 0 ? properties.length - 1 : prev - 1
+    );
+  };
 
   const navItems = [
     {
@@ -54,7 +78,7 @@ const ManagerDashboard = () => {
     {
       section: "FINANCE",
       items: [
-        { icon: DollarSign, label: "Rent", path: "/manager/rent" },
+        { icon: DollarSign, label: "Rent", path: "/rent" },
         { icon: Receipt, label: "Bills", path: "/manager/bills" },
         { icon: Wallet, label: "Expenses", path: "/manager/expenses" },
       ],
@@ -80,99 +104,64 @@ const ManagerDashboard = () => {
     },
   ];
 
-  // Properties array for carousel
-  const properties = [
-    {
-      id: 1,
-      name: "Green Valley House",
-      location: "Kathmandu",
-      type: "Shared House",
-      rooms: 6,
-      residents: 7,
-      totalRent: 42000,
-      occupancyRate: 83,
-      color: "from-teal-100 via-emerald-50 to-slate-100",
-    },
-    {
-      id: 2,
-      name: "Sunset Apartment",
-      location: "Lalitpur",
-      type: "Apartment",
-      rooms: 4,
-      residents: 5,
-      totalRent: 28000,
-      occupancyRate: 90,
-      color: "from-teal-100 via-cyan-50 to-slate-100",
-    },
-    {
-      id: 3,
-      name: "Mountain View Villa",
-      location: "Bhaktapur",
-      type: "Villa",
-      rooms: 8,
-      residents: 6,
-      totalRent: 56000,
-      occupancyRate: 75,
-      color: "from-green-100 via-emerald-50 to-slate-100",
-    },
-  ];
-
-  const currentProperty = properties[currentPropertyIndex];
-
-  const nextProperty = () => {
-    setCurrentPropertyIndex((prev) => (prev + 1) % properties.length);
-  };
-
-  const prevProperty = () => {
-    setCurrentPropertyIndex((prev) =>
-      prev === 0 ? properties.length - 1 : prev - 1
+  // Stats derived from real properties
+  const stats = useMemo(() => {
+    const totalProperties = properties.length;
+    const totalRooms = properties.reduce((s, p) => s + (p.rooms || 0), 0);
+    const totalCapacity = properties.reduce(
+      (s, p) =>
+        s + (p.totalCapacity || p.rooms * (p.peoplePerRoom || 1)),
+      0
     );
-  };
+    const totalPotentialRent = properties.reduce(
+      (s, p) =>
+        s + (p.totalPotentialRent || p.rooms * (p.rent || 0)),
+      0
+    );
 
-  // ...existing code...
-  const stats = [
-    {
-      icon: Building2,
-      value: "3",
-      label: "Properties",
-      sub: "12 Rooms",
-      color: "bg-teal-50 text-teal-600",
-      bgGradient: "from-teal-50 to-teal-100",
-      trend: "+2.5%",
-      trendUp: true,
-    },
-    {
-      icon: Users,
-      value: "18",
-      label: "Residents",
-      sub: "16 Active",
-      color: "bg-emerald-50 text-emerald-600",
-      bgGradient: "from-emerald-50 to-emerald-100",
-      trend: "+3.2%",
-      trendUp: true,
-    },
-    {
-      icon: BedDouble,
-      value: "85%",
-      label: "Occupancy",
-      sub: "avg. occupancy",
-      color: "bg-cyan-50 text-cyan-600",
-      bgGradient: "from-cyan-50 to-cyan-100",
-      trend: "+5.2%",
-      trendUp: true,
-    },
-    {
-      icon: DollarSign,
-      value: "₹24,000",
-      label: "Rent Due",
-      sub: "3 Pending",
-      color: "bg-amber-50 text-amber-600",
-      bgGradient: "from-amber-50 to-amber-100",
-      trend: "-1.8%",
-      trendUp: false,
-    },
-  ];
+    return [
+      {
+        icon: Building2,
+        value: String(totalProperties),
+        label: "Properties",
+        sub: `${totalRooms} Rooms`,
+        color: "bg-teal-50 text-teal-600",
+        trend: totalProperties > 0 ? "Active" : "None yet",
+        trendUp: totalProperties > 0,
+      },
+      {
+        icon: Users,
+        value: String(totalCapacity),
+        label: "Capacity",
+        sub: "people (max)",
+        color: "bg-emerald-50 text-emerald-600",
+        trend: "—",
+        trendUp: true,
+      },
+      {
+        icon: BedDouble,
+        value: totalRooms ? "—" : "0%",
+        label: "Occupancy",
+        sub: "add residents to track",
+        color: "bg-cyan-50 text-cyan-600",
+        trend: "—",
+        trendUp: true,
+      },
+      {
+        icon: DollarSign,
+        value: totalPotentialRent
+          ? `₹${totalPotentialRent.toLocaleString()}`
+          : "₹0",
+        label: "Potential Rent",
+        sub: "per month (all rooms)",
+        color: "bg-amber-50 text-amber-600",
+        trend: "—",
+        trendUp: false,
+      },
+    ];
+  }, [properties]);
 
+  // Keep these mock for now (will become real when Rooms / Residents / Rent are wired)
   const recentPayments = [
     { name: "Darshana", amount: "₹10,000", status: "paid", daysAgo: "Today" },
     { name: "Ram", amount: "₹10,000", status: "paid", daysAgo: "Yesterday" },
@@ -193,12 +182,11 @@ const ManagerDashboard = () => {
     <div className="flex min-h-screen bg-slate-50 text-slate-800">
       {/* ── Fixed Sidebar ── */}
       <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-slate-200 bg-white shadow-sm">
-        {/* Logo */}
         <div
           className="flex cursor-pointer items-center gap-2.5 border-b border-slate-100 px-5 py-5 transition-all duration-200 hover:bg-slate-50"
           onClick={() => navigate("/manager-dashboard")}
         >
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-linear-to-br from-teal-600 to-teal-700 text-white shadow-md transition-transform hover:scale-105">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-teal-600 to-teal-700 text-white shadow-md transition-transform hover:scale-105">
             <Home className="h-5 w-5" />
           </div>
           <div>
@@ -209,7 +197,6 @@ const ManagerDashboard = () => {
           </div>
         </div>
 
-        {/* Navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           {navItems.map((group) => (
             <div key={group.section} className="mb-5">
@@ -247,9 +234,8 @@ const ManagerDashboard = () => {
           ))}
         </nav>
 
-        {/* Sidebar Footer */}
         <div className="border-t border-slate-100 px-3 py-4">
-          <div className="rounded-lg bg-linear-to-r from-teal-50 to-emerald-50 p-3">
+          <div className="rounded-lg bg-gradient-to-r from-teal-50 to-emerald-50 p-3">
             <p className="text-xs font-semibold text-slate-700">Version 1.0</p>
             <p className="mt-1 text-[11px] text-slate-500">
               Manage all your properties in one place
@@ -260,10 +246,9 @@ const ManagerDashboard = () => {
 
       {/* ── Main Content ── */}
       <div className="ml-64 flex flex-1 flex-col">
-        {/* Top Header */}
         <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white/80 px-8 py-4 backdrop-blur-sm">
           <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-linear-to-br from-teal-600 to-teal-700 text-white shadow-md">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-teal-600 to-teal-700 text-white shadow-md">
               <Home className="h-4 w-4" />
             </div>
             <span className="text-base font-semibold text-slate-800">
@@ -300,7 +285,7 @@ const ManagerDashboard = () => {
               <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500 animate-pulse" />
             </button>
             <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 transition-all hover:bg-slate-100">
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-linear-to-br from-teal-500 to-teal-600 text-xs font-semibold text-white shadow-sm">
+              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-teal-500 to-teal-600 text-xs font-semibold text-white shadow-sm">
                 DB
               </div>
               <div className="hidden sm:block">
@@ -313,7 +298,6 @@ const ManagerDashboard = () => {
           </div>
         </header>
 
-        {/* Dashboard Body */}
         <main className="flex-1 p-8">
           {/* Greeting */}
           <div className="mb-6 flex items-center justify-between">
@@ -322,14 +306,27 @@ const ManagerDashboard = () => {
                 Good evening, Darshana 👋
               </h1>
               <p className="mt-1 text-sm text-slate-500">
-                Here's what's happening with your properties today.
+                {hasProperties
+                  ? "Here's what's happening with your properties today."
+                  : "Create your first property to get started."}
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <select className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:border-teal-400">
-                <option>All Properties</option>
-                <option>Green Valley House</option>
-              </select>
+              {hasProperties && (
+                <select
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:border-teal-400"
+                  value={currentPropertyIndex}
+                  onChange={(e) =>
+                    setCurrentPropertyIndex(Number(e.target.value))
+                  }
+                >
+                  {properties.map((p, idx) => (
+                    <option key={p.id} value={idx}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              )}
               <button
                 onClick={() => navigate("/property")}
                 className="flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-teal-700"
@@ -359,7 +356,11 @@ const ManagerDashboard = () => {
                       </p>
                       <div className="mt-2 flex items-center justify-between">
                         <p className="text-xs text-slate-400">{stat.sub}</p>
-                        <div className={`flex items-center gap-1 text-xs font-semibold ${stat.trendUp ? 'text-emerald-600' : 'text-red-600'}`}>
+                        <div
+                          className={`flex items-center gap-1 text-xs font-semibold ${
+                            stat.trendUp ? "text-emerald-600" : "text-slate-400"
+                          }`}
+                        >
                           {stat.trendUp ? (
                             <TrendingUp className="h-3 w-3" />
                           ) : (
@@ -380,136 +381,163 @@ const ManagerDashboard = () => {
             })}
           </div>
 
-          {/* Property Highlight + Overview */}
-          <div className="mb-8 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg transition-all duration-300 hover:shadow-xl">
-            <div className="flex flex-col lg:flex-row">
-              {/* Image Placeholder with Carousel */}
-              <div className="relative flex h-64 w-full items-center justify-center overflow-hidden bg-linear-to-br from-teal-100 via-emerald-50 to-slate-100 lg:h-auto lg:w-2/5">
-                <div className={`absolute inset-0 bg-linear-to-br transition-all duration-500 ${currentProperty.color}`} />
-                <Building2 className="relative z-10 h-16 w-16 text-teal-300" />
-                
-                {/* Carousel Controls */}
-                <div className="absolute inset-0 flex items-center justify-between px-4 z-20">
-                  <button
-                    onClick={prevProperty}
-                    className="rounded-full bg-white/80 p-2 shadow-lg transition-all hover:bg-white hover:shadow-xl"
-                  >
-                    <ChevronLeft className="h-5 w-5 text-slate-700" />
-                  </button>
-                  <button
-                    onClick={nextProperty}
-                    className="rounded-full bg-white/80 p-2 shadow-lg transition-all hover:bg-white hover:shadow-xl"
-                  >
-                    <ChevronRight className="h-5 w-5 text-slate-700" />
-                  </button>
-                </div>
-
-                {/* Carousel Indicators */}
-                <div className="absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 gap-1.5">
-                  {properties.map((_, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => setCurrentPropertyIndex(idx)}
-                      className={`h-2 rounded-full transition-all duration-300 ${
-                        idx === currentPropertyIndex
-                          ? "w-6 bg-teal-600"
-                          : "w-2 bg-white/50 hover:bg-white/70"
-                      }`}
+          {/* Property Highlight OR Empty State */}
+          {hasProperties && currentProperty ? (
+            <div className="mb-8 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg transition-all duration-300 hover:shadow-xl">
+              <div className="flex flex-col lg:flex-row">
+                <div className="relative flex h-64 w-full items-center justify-center overflow-hidden bg-gradient-to-br from-teal-100 via-emerald-50 to-slate-100 lg:h-auto lg:w-2/5">
+                  {currentProperty.coverUrl ? (
+                    <img
+                      src={currentProperty.coverUrl}
+                      alt={currentProperty.name}
+                      className="absolute inset-0 h-full w-full object-cover"
                     />
-                  ))}
-                </div>
-              </div>
+                  ) : (
+                    <Building2 className="relative z-10 h-16 w-16 text-teal-300" />
+                  )}
 
-              {/* Property Info */}
-              <div className="flex flex-1 flex-col justify-between p-6">
-                <div>
-                  <div className="flex items-start justify-between">
-                    <h2 className="text-xl font-bold text-slate-900">
-                      🏡 {currentProperty.name}
-                    </h2>
-                    <span className="rounded-full bg-teal-100 px-3 py-1 text-xs font-semibold text-teal-700">
-                      {currentProperty.type}
-                    </span>
-                  </div>
-                  <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-                    <div className="flex flex-col items-start gap-1">
-                      <span className="text-xs font-medium text-slate-400">
-                        LOCATION
-                      </span>
-                      <div className="flex items-center gap-2 text-sm text-slate-600">
-                        <MapPin className="h-4 w-4 text-teal-600" />
-                        {currentProperty.location}
+                  {properties.length > 1 && (
+                    <>
+                      <div className="absolute inset-0 z-20 flex items-center justify-between px-4">
+                        <button
+                          onClick={prevProperty}
+                          className="rounded-full bg-white/80 p-2 shadow-lg transition-all hover:bg-white hover:shadow-xl"
+                        >
+                          <ChevronLeft className="h-5 w-5 text-slate-700" />
+                        </button>
+                        <button
+                          onClick={nextProperty}
+                          className="rounded-full bg-white/80 p-2 shadow-lg transition-all hover:bg-white hover:shadow-xl"
+                        >
+                          <ChevronRight className="h-5 w-5 text-slate-700" />
+                        </button>
                       </div>
-                    </div>
-                    <div className="flex flex-col items-start gap-1">
-                      <span className="text-xs font-medium text-slate-400">
-                        TYPE
-                      </span>
-                      <div className="flex items-center gap-2 text-sm text-slate-600">
-                        <Home className="h-4 w-4 text-teal-600" />
+                      <div className="absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 gap-1.5">
+                        {properties.map((_, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => setCurrentPropertyIndex(idx)}
+                            className={`h-2 rounded-full transition-all duration-300 ${
+                              idx === currentPropertyIndex
+                                ? "w-6 bg-teal-600"
+                                : "w-2 bg-white/50 hover:bg-white/70"
+                            }`}
+                          />
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <div className="flex flex-1 flex-col justify-between p-6">
+                  <div>
+                    <div className="flex items-start justify-between">
+                      <h2 className="text-xl font-bold text-slate-900">
+                        🏡 {currentProperty.name}
+                      </h2>
+                      <span className="rounded-full bg-teal-100 px-3 py-1 text-xs font-semibold text-teal-700">
                         {currentProperty.type}
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-start gap-1">
-                      <span className="text-xs font-medium text-slate-400">
-                        ROOMS
-                      </span>
-                      <div className="flex items-center gap-2 text-sm text-slate-600">
-                        <BedDouble className="h-4 w-4 text-teal-600" />
-                        {currentProperty.rooms} Rooms
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-start gap-1">
-                      <span className="text-xs font-medium text-slate-400">
-                        RESIDENTS
-                      </span>
-                      <div className="flex items-center gap-2 text-sm text-slate-600">
-                        <Users className="h-4 w-4 text-teal-600" />
-                        {currentProperty.residents}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-6 flex items-center gap-3">
-                    <div>
-                      <p className="text-xs font-medium text-slate-400">
-                        TOTAL RENT
-                      </p>
-                      <span className="text-2xl font-bold text-slate-900">
-                        ₹{currentProperty.totalRent.toLocaleString()}
                       </span>
                     </div>
-                    <div className="flex-1">
-                      <div className="mb-1 flex items-center justify-between">
+
+                    <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+                      <div className="flex flex-col items-start gap-1">
+                        <span className="text-xs font-medium text-slate-400">
+                          LOCATION
+                        </span>
+                        <div className="flex items-center gap-2 text-sm text-slate-600">
+                          <MapPin className="h-4 w-4 text-teal-600" />
+                          {currentProperty.address}
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-start gap-1">
+                        <span className="text-xs font-medium text-slate-400">
+                          TYPE
+                        </span>
+                        <div className="flex items-center gap-2 text-sm text-slate-600">
+                          <Home className="h-4 w-4 text-teal-600" />
+                          {currentProperty.type}
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-start gap-1">
+                        <span className="text-xs font-medium text-slate-400">
+                          ROOMS
+                        </span>
+                        <div className="flex items-center gap-2 text-sm text-slate-600">
+                          <BedDouble className="h-4 w-4 text-teal-600" />
+                          {currentProperty.rooms} Rooms
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-start gap-1">
+                        <span className="text-xs font-medium text-slate-400">
+                          CAPACITY
+                        </span>
+                        <div className="flex items-center gap-2 text-sm text-slate-600">
+                          <Users className="h-4 w-4 text-teal-600" />
+                          {currentProperty.totalCapacity ||
+                            currentProperty.rooms *
+                              (currentProperty.peoplePerRoom || 1)}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-6 flex items-center gap-3">
+                      <div>
                         <p className="text-xs font-medium text-slate-400">
-                          OCCUPANCY
+                          TOTAL POTENTIAL RENT
                         </p>
-                        <span className="text-xs font-semibold text-teal-600">
-                          {currentProperty.occupancyRate}%
+                        <span className="text-2xl font-bold text-slate-900">
+                          ₹
+                          {(
+                            currentProperty.totalPotentialRent ||
+                            currentProperty.rooms * currentProperty.rent
+                          ).toLocaleString()}
                         </span>
                       </div>
-                      <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
-                        <div
-                          className="h-full rounded-full bg-linear-to-r from-teal-500 to-teal-600 transition-all duration-500"
-                          style={{ width: `${currentProperty.occupancyRate}%` }}
-                        />
-                      </div>
                     </div>
+
+                    {currentProperty.inviteCode && (
+                      <p className="mt-3 text-xs text-slate-500">
+                        Invite code:{" "}
+                        <span className="font-mono font-semibold text-teal-700">
+                          {currentProperty.inviteCode}
+                        </span>
+                      </p>
+                    )}
                   </div>
+
+                  <button
+                    onClick={() => navigate("/property")}
+                    className="mt-5 flex w-fit items-center gap-2 rounded-lg bg-gradient-to-r from-teal-600 to-teal-700 px-4 py-2 text-sm font-medium text-white shadow-md transition-all hover:shadow-lg hover:from-teal-700 hover:to-teal-800"
+                  >
+                    View Property
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
                 </div>
-                <button
-                  onClick={() => navigate("/property")}
-                  className="mt-5 flex w-fit items-center gap-2 rounded-lg bg-linear-to-r from-teal-600 to-teal-700 px-4 py-2 text-sm font-medium text-white shadow-md transition-all hover:shadow-lg hover:from-teal-700 hover:to-teal-800"
-                >
-                  View Property
-                  <ChevronRight className="h-4 w-4" />
-                </button>
               </div>
             </div>
-          </div>
+          ) : (
+            <div className="mb-8 rounded-xl border border-dashed border-slate-300 bg-white p-12 text-center">
+              <Building2 className="mx-auto h-12 w-12 text-slate-300" />
+              <h3 className="mt-4 text-lg font-semibold text-slate-800">
+                No properties yet
+              </h3>
+              <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
+                Create your first property to see stats, occupancy, rent
+                overview and more on this dashboard.
+              </p>
+              <button
+                onClick={() => navigate("/property")}
+                className="mt-6 inline-flex items-center gap-2 rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-teal-700"
+              >
+                <Plus className="h-4 w-4" />
+                Create Your First Property
+              </button>
+            </div>
+          )}
 
-          {/* Middle Row: Rent Collection + Needs Attention */}
+          {/* Middle Row: Rent Collection + Needs Attention (still mock) */}
           <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-3">
-            {/* Rent Collection Chart */}
             <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-lg lg:col-span-2">
               <div className="mb-6 flex items-center justify-between">
                 <div>
@@ -537,10 +565,10 @@ const ManagerDashboard = () => {
                 ].map((bar) => (
                   <div
                     key={bar.month}
-                    className="flex flex-1 flex-col items-center gap-3 group"
+                    className="group flex flex-1 flex-col items-center gap-3"
                   >
                     <div
-                      className="w-full max-w-10 rounded-t-lg bg-linear-to-t from-teal-600 to-teal-400 shadow-md transition-all group-hover:shadow-lg"
+                      className="w-full max-w-10 rounded-t-lg bg-gradient-to-t from-teal-600 to-teal-400 shadow-md transition-all group-hover:shadow-lg"
                       style={{ height: bar.h }}
                       title={bar.collected}
                     />
@@ -556,7 +584,6 @@ const ManagerDashboard = () => {
               </div>
             </div>
 
-            {/* Needs Attention */}
             <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-lg">
               <h3 className="mb-4 flex items-center gap-2 text-base font-semibold text-slate-800">
                 <AlertCircle className="h-5 w-5 text-red-600" />
@@ -564,18 +591,20 @@ const ManagerDashboard = () => {
               </h3>
               <ul className="space-y-3">
                 <li className="flex items-center gap-3 rounded-lg border border-red-100 bg-red-50 px-3 py-3 transition-all hover:bg-red-100">
-                  <span className="h-3 w-3 rounded-full bg-red-500 animate-pulse" />
-                  <div className="flex-1 min-w-0">
+                  <span className="h-3 w-3 animate-pulse rounded-full bg-red-500" />
+                  <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-red-900">
                       Sita rent
                     </p>
-                    <p className="text-xs text-red-700">₹12,000 - Overdue 5 days</p>
+                    <p className="text-xs text-red-700">
+                      ₹12,000 - Overdue 5 days
+                    </p>
                   </div>
                   <ChevronRight className="h-4 w-4 text-red-600" />
                 </li>
                 <li className="flex items-center gap-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-3 transition-all hover:bg-amber-100">
-                  <span className="h-3 w-3 rounded-full bg-amber-500 animate-pulse" />
-                  <div className="flex-1 min-w-0">
+                  <span className="h-3 w-3 animate-pulse rounded-full bg-amber-500" />
+                  <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-amber-900">
                       Join request
                     </p>
@@ -584,8 +613,8 @@ const ManagerDashboard = () => {
                   <ChevronRight className="h-4 w-4 text-amber-600" />
                 </li>
                 <li className="flex items-center gap-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-3 transition-all hover:bg-amber-100">
-                  <span className="h-3 w-3 rounded-full bg-amber-500 animate-pulse" />
-                  <div className="flex-1 min-w-0">
+                  <span className="h-3 w-3 animate-pulse rounded-full bg-amber-500" />
+                  <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-amber-900">
                       Bill pending
                     </p>
@@ -596,9 +625,9 @@ const ManagerDashboard = () => {
               </ul>
             </div>
           </div>
+
           {/* Bottom Row */}
           <div className="mb-8 grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
-            {/* Recent Rent Payments */}
             <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-lg">
               <h3 className="mb-4 flex items-center gap-2 text-base font-semibold text-slate-800">
                 <DollarSign className="h-5 w-5 text-teal-600" />
@@ -614,7 +643,7 @@ const ManagerDashboard = () => {
                       <p className="font-semibold text-slate-800">{p.name}</p>
                       <p className="text-xs text-slate-500">{p.daysAgo}</p>
                     </div>
-                    <div className="flex items-center gap-2 ml-2">
+                    <div className="ml-2 flex items-center gap-2">
                       <span className="font-semibold text-slate-700">
                         {p.amount}
                       </span>
@@ -627,12 +656,14 @@ const ManagerDashboard = () => {
                   </li>
                 ))}
               </ul>
-              <button className="mt-4 text-xs font-semibold text-teal-600 hover:text-teal-700 transition-colors">
+              <button
+                onClick={() => navigate("/rent")}
+                className="mt-4 text-xs font-semibold text-teal-600 transition-colors hover:text-teal-700"
+              >
                 View All →
               </button>
             </div>
 
-            {/* Occupancy */}
             <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-lg">
               <h3 className="mb-4 flex items-center gap-2 text-base font-semibold text-slate-800">
                 <BedDouble className="h-5 w-5 text-teal-600" />
@@ -651,9 +682,9 @@ const ManagerDashboard = () => {
                       <div
                         className={`h-full rounded-full transition-all ${
                           room.status === "full"
-                            ? "bg-linear-to-r from-emerald-500 to-emerald-600"
+                            ? "bg-gradient-to-r from-emerald-500 to-emerald-600"
                             : room.status === "partial"
-                            ? "bg-linear-to-r from-amber-400 to-amber-500"
+                            ? "bg-gradient-to-r from-amber-400 to-amber-500"
                             : "bg-slate-300"
                         }`}
                         style={{ width: `${room.fill}%` }}
@@ -671,7 +702,6 @@ const ManagerDashboard = () => {
               </ul>
             </div>
 
-            {/* Household Health */}
             <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-lg">
               <h3 className="mb-4 flex items-center gap-2 text-base font-semibold text-slate-800">
                 <CheckCircle2 className="h-5 w-5 text-teal-600" />
@@ -679,10 +709,12 @@ const ManagerDashboard = () => {
               </h3>
               <div className="mb-4 text-center">
                 <p className="text-4xl font-bold text-slate-900">87%</p>
-                <p className="text-xs text-slate-500 font-medium">Overall Health</p>
+                <p className="text-xs font-medium text-slate-500">
+                  Overall Health
+                </p>
                 <div className="mx-auto mt-3 h-2.5 w-full max-w-40 overflow-hidden rounded-full bg-slate-200">
                   <div
-                    className="h-full rounded-full bg-linear-to-r from-teal-500 to-teal-600"
+                    className="h-full rounded-full bg-gradient-to-r from-teal-500 to-teal-600"
                     style={{ width: "87%" }}
                   />
                 </div>
@@ -707,7 +739,6 @@ const ManagerDashboard = () => {
               </ul>
             </div>
 
-            {/* Recent Activity */}
             <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-lg">
               <h3 className="mb-4 flex items-center gap-2 text-base font-semibold text-slate-800">
                 <Activity className="h-5 w-5 text-teal-600" />
@@ -715,7 +746,7 @@ const ManagerDashboard = () => {
               </h3>
               <ul className="space-y-4">
                 <li className="flex gap-3 rounded-lg bg-emerald-50 p-3 transition-all hover:bg-emerald-100">
-                  <span className="mt-1.5 h-2.5 w-2.5 rounded-full bg-emerald-500 shrink-0" />
+                  <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500" />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-emerald-900">
                       Rent paid
@@ -724,7 +755,7 @@ const ManagerDashboard = () => {
                   </div>
                 </li>
                 <li className="flex gap-3 rounded-lg bg-teal-50 p-3 transition-all hover:bg-teal-100">
-                  <span className="mt-1.5 h-2.5 w-2.5 rounded-full bg-teal-500 shrink-0" />
+                  <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-teal-500" />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-teal-900">
                       New resident
@@ -733,7 +764,7 @@ const ManagerDashboard = () => {
                   </div>
                 </li>
                 <li className="flex gap-3 rounded-lg bg-amber-50 p-3 transition-all hover:bg-amber-100">
-                  <span className="mt-1.5 h-2.5 w-2.5 rounded-full bg-amber-500 shrink-0" />
+                  <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-amber-500" />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-amber-900">
                       Bill added
@@ -746,7 +777,7 @@ const ManagerDashboard = () => {
           </div>
 
           {/* Quick Actions */}
-          <div className="rounded-xl border border-slate-200 bg-linear-to-br from-white to-slate-50 p-6 shadow-sm">
+          <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-6 shadow-sm">
             <h3 className="mb-5 flex items-center gap-2 text-base font-semibold text-slate-800">
               <Zap className="h-5 w-5 text-teal-600" />
               Quick Actions
@@ -754,23 +785,23 @@ const ManagerDashboard = () => {
             <div className="flex flex-wrap gap-3">
               <button
                 onClick={() => navigate("/property")}
-                className="flex items-center gap-2 rounded-lg border border-teal-200 bg-linear-to-r from-teal-50 to-teal-100 px-4 py-2.5 text-sm font-semibold text-teal-700 transition-all hover:border-teal-300 hover:shadow-md hover:from-teal-100 hover:to-teal-200"
+                className="flex items-center gap-2 rounded-lg border border-teal-200 bg-gradient-to-r from-teal-50 to-teal-100 px-4 py-2.5 text-sm font-semibold text-teal-700 transition-all hover:border-teal-300 hover:from-teal-100 hover:to-teal-200 hover:shadow-md"
               >
                 <Plus className="h-4 w-4" />
                 Property
               </button>
-              <button className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-linear-to-r from-emerald-50 to-emerald-100 px-4 py-2.5 text-sm font-semibold text-emerald-700 transition-all hover:border-emerald-300 hover:shadow-md hover:from-emerald-100 hover:to-emerald-200">
+              <button className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-gradient-to-r from-emerald-50 to-emerald-100 px-4 py-2.5 text-sm font-semibold text-emerald-700 transition-all hover:border-emerald-300 hover:from-emerald-100 hover:to-emerald-200 hover:shadow-md">
                 <Plus className="h-4 w-4" />
                 Resident
               </button>
               <button
-                onClick={() => navigate("/manager/rent")}
-                className="flex items-center gap-2 rounded-lg border border-cyan-200 bg-linear-to-r from-cyan-50 to-cyan-100 px-4 py-2.5 text-sm font-semibold text-cyan-700 transition-all hover:border-cyan-300 hover:shadow-md hover:from-cyan-100 hover:to-cyan-200"
+                onClick={() => navigate("/rent")}
+                className="flex items-center gap-2 rounded-lg border border-cyan-200 bg-gradient-to-r from-cyan-50 to-cyan-100 px-4 py-2.5 text-sm font-semibold text-cyan-700 transition-all hover:border-cyan-300 hover:from-cyan-100 hover:to-cyan-200 hover:shadow-md"
               >
                 <Plus className="h-4 w-4" />
                 Rent
               </button>
-              <button className="flex items-center gap-2 rounded-lg border border-amber-200 bg-linear-to-r from-amber-50 to-amber-100 px-4 py-2.5 text-sm font-semibold text-amber-700 transition-all hover:border-amber-300 hover:shadow-md hover:from-amber-100 hover:to-amber-200">
+              <button className="flex items-center gap-2 rounded-lg border border-amber-200 bg-gradient-to-r from-amber-50 to-amber-100 px-4 py-2.5 text-sm font-semibold text-amber-700 transition-all hover:border-amber-300 hover:from-amber-100 hover:to-amber-200 hover:shadow-md">
                 <Plus className="h-4 w-4" />
                 Bill
               </button>
