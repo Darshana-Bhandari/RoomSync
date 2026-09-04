@@ -47,7 +47,7 @@ const SETUP_STEPS = [
 ];
 
 const MAX_PHOTOS = 5;
-const MAX_FILE_SIZE_MB = 5;
+const MAX_FILE_SIZE_MB = 3;
 const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
 const TAKEN_CODES = ["GREENHOUSE", "ROOMSYNC", "TESTHOUSE", "KTMHOUSE"];
@@ -55,12 +55,60 @@ const TAKEN_CODES = ["GREENHOUSE", "ROOMSYNC", "TESTHOUSE", "KTMHOUSE"];
 const CODE_MIN = 6;
 const CODE_MAX = 12;
 
-/** Convert File → base64 data URL so it survives refresh & localStorage */
-const fileToDataUrl = (file) =>
+/**
+ * Convert image to a smaller Base64 data URL.
+ * This prevents localStorage from becoming too large.
+ */
+const fileToDataUrl = (file, maxWidth = 1200, quality = 0.8) =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
+
+    reader.onload = (event) => {
+      const img = new Image();
+
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        // Resize large images
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext("2d");
+
+        if (!ctx) {
+          reject(new Error("Unable to process image."));
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Store as JPEG to reduce size
+        const compressedImage = canvas.toDataURL(
+          "image/jpeg",
+          quality
+        );
+
+        resolve(compressedImage);
+      };
+
+      img.onerror = () => {
+        reject(new Error("Unable to load selected image."));
+      };
+
+      img.src = event.target.result;
+    };
+
+    reader.onerror = () => {
+      reject(new Error("Unable to read selected image."));
+    };
+
     reader.readAsDataURL(file);
   });
 
@@ -442,38 +490,70 @@ const Property = () => {
     try {
       await new Promise((resolve) => setTimeout(resolve, 1200));
 
-      // Convert first photo to base64 so it survives refresh
+      // Convert first photo to a smaller base64 so it survives refresh
       let coverUrl = null;
       if (photos[0]?.file) {
         try {
-          coverUrl = await fileToDataUrl(photos[0].file);
-        } catch {
-          coverUrl = null;
+          coverUrl = await fileToDataUrl(photos[0].file, 1200, 0.8);
+        } catch (imageError) {
+          console.error("Image processing failed:", imageError);
+
+          setErrors((prev) => ({
+            ...prev,
+            submit: "Unable to process the property image.",
+          }));
+
+          setIsLoading(false);
+          return;
         }
       }
 
       const newProperty = {
         id: Date.now(),
+
         name: formData.name.trim(),
         address: formData.address.trim(),
+        location: formData.address.trim(),
+
         type: formData.type,
+
         rooms: Number(formData.rooms),
+
         description: formData.description.trim(),
+
         peoplePerRoom: Number(formData.peoplePerRoom),
+
         rent: Number(formData.rent),
+
         photoCount: photos.length,
-        coverUrl, // base64 data URL
+
+        // Main property image
+        coverUrl: coverUrl || null,
+
+        // Keep image aliases for other pages/components
+        image: coverUrl || null,
+        imageUrl: coverUrl || null,
+
         inviteCode: null,
+
         createdAt: new Date().toISOString(),
+
         totalCapacity:
           Number(formData.rooms) * Number(formData.peoplePerRoom),
+
         totalPotentialRent:
           Number(formData.rooms) * Number(formData.rent),
+
         roomsList: [],
+
         residents: [],
+
         bills: [],
+
         expenses: [],
+
         chores: [],
+
         activities: [
           {
             id: `act-${Date.now()}`,
@@ -483,6 +563,7 @@ const Property = () => {
             time: "Just now",
           },
         ],
+
         occupiedCapacity: 0,
       };
 

@@ -613,144 +613,163 @@ const ManagerDashboard = () => {
             })}
           </div>
 
-         {/* Property overview or empty */}
-{hasProperties && currentProperty ? (
-  <div className="mb-8 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg transition-all duration-300 hover:shadow-xl">
-    <div className="flex flex-col lg:flex-row">
-      {/* LEFT: Cover / placeholder — always visible */}
-      <div className="relative flex h-56 w-full shrink-0 items-center justify-center overflow-hidden bg-gradient-to-br from-teal-100 via-emerald-50 to-slate-100 lg:h-auto lg:min-h-[240px] lg:w-2/5">
-        {currentProperty.coverUrl ? (
-          <img
-            src={currentProperty.coverUrl}
-            alt={currentProperty.name}
-            className="absolute inset-0 h-full w-full object-cover"
-            onError={(e) => {
-              e.currentTarget.style.display = "none";
-            }}
-          />
-        ) : null}
+          {/* Property overview or empty */}
+          {hasProperties && currentProperty ? (
+            <div className="mb-8 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg transition-all duration-300 hover:shadow-xl">
+              <div className="flex flex-col lg:flex-row">
+                {/* LEFT: Property Cover */}
+                <div className="relative flex h-56 w-full shrink-0 items-center justify-center overflow-hidden bg-gradient-to-br from-teal-100 via-emerald-50 to-slate-100 lg:h-auto lg:min-h-[240px] lg:w-2/5">
+                  {currentProperty.coverUrl ? (
+                    <img
+                      src={currentProperty.coverUrl}
+                      alt={currentProperty.name || "Property"}
+                      className="absolute inset-0 h-full w-full object-cover"
+                      onError={(e) => {
+                        console.error(
+                          "Property image failed to load:",
+                          currentProperty.coverUrl?.substring(0, 50)
+                        );
 
-        {!currentProperty.coverUrl && (
-          <div className="relative z-10 flex flex-col items-center gap-2">
-            <Building2 className="h-16 w-16 text-teal-300" />
-            <span className="text-xs font-medium text-teal-600/70">
-              No cover photo
-            </span>
-          </div>
-        )}
+                        e.currentTarget.style.display = "none";
 
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/5 to-transparent" />
-      </div>
+                        const fallback =
+                          e.currentTarget.parentElement?.querySelector(
+                            ".property-image-fallback"
+                          );
 
-      {/* RIGHT: Details */}
-      <div className="flex flex-1 flex-col justify-between p-6">
-        <div>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <h2 className="text-xl font-bold text-slate-900">
-              🏡 {currentProperty.name}
-            </h2>
-            <span className="rounded-full bg-teal-100 px-3 py-1 text-xs font-semibold text-teal-700">
-              {currentProperty.type || "Property"}
-            </span>
-          </div>
+                        if (fallback) {
+                          fallback.classList.remove("hidden");
+                        }
+                      }}
+                    />
+                  ) : null}
 
-          <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <div className="flex flex-col gap-1">
-              <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Location
-              </span>
-              <div className="flex items-center gap-2 text-sm text-slate-700">
-                <MapPin className="h-4 w-4 shrink-0 text-teal-600" />
-                <span className="truncate">
-                  {currentProperty.address || "—"}
-                </span>
+                  {/* Fallback */}
+                  <div
+                    className={`property-image-fallback relative z-10 flex flex-col items-center gap-2 ${
+                      currentProperty.coverUrl ? "hidden" : ""
+                    }`}
+                  >
+                    <Building2 className="h-16 w-16 text-teal-300" />
+                    <span className="text-xs font-medium text-teal-600/70">
+                      No cover photo
+                    </span>
+                  </div>
+
+                  {/* Overlay */}
+                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/5 to-transparent" />
+                </div>
+
+                {/* RIGHT: Details */}
+                <div className="flex flex-1 flex-col justify-between p-6">
+                  <div>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <h2 className="text-xl font-bold text-slate-900">
+                        🏡 {currentProperty.name}
+                      </h2>
+                      <span className="rounded-full bg-teal-100 px-3 py-1 text-xs font-semibold text-teal-700">
+                        {currentProperty.type || "Property"}
+                      </span>
+                    </div>
+
+                    <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                          Location
+                        </span>
+                        <div className="flex items-center gap-2 text-sm text-slate-700">
+                          <MapPin className="h-4 w-4 shrink-0 text-teal-600" />
+                          <span className="truncate">
+                            {currentProperty.address || "—"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-1">
+                        <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                          Rooms
+                        </span>
+                        <div className="flex items-center gap-2 text-sm text-slate-700">
+                          <BedDouble className="h-4 w-4 shrink-0 text-teal-600" />
+                          {currentProperty.rooms || 0} Rooms
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-1">
+                        <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                          Capacity
+                        </span>
+                        <div className="flex items-center gap-2 text-sm text-slate-700">
+                          <Users className="h-4 w-4 shrink-0 text-teal-600" />
+                          {currentProperty.totalCapacity ||
+                            (currentProperty.rooms || 0) *
+                              (currentProperty.peoplePerRoom || 1)}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-1">
+                        <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                          Rent / Room
+                        </span>
+                        <div className="flex items-center gap-2 text-sm text-slate-700">
+                          <DollarSign className="h-4 w-4 shrink-0 text-teal-600" />
+                          {formatCurrency(currentProperty.rent)}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-6">
+                      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                        Expected Monthly Rent (This Property)
+                      </p>
+                      <p className="mt-1 text-2xl font-bold text-slate-900">
+                        {formatCurrency(
+                          currentProperty.totalPotentialRent ||
+                            (currentProperty.rooms || 0) *
+                              (currentProperty.rent || 0)
+                        )}
+                      </p>
+
+                      {currentProperty.inviteCode && (
+                        <p className="mt-2 text-xs text-slate-500">
+                          Invite code:{" "}
+                          <span className="rounded bg-teal-50 px-1.5 py-0.5 font-mono font-semibold text-teal-700">
+                            {currentProperty.inviteCode}
+                          </span>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => navigate("/property")}
+                    className="mt-6 flex w-fit items-center gap-2 rounded-lg bg-gradient-to-r from-teal-600 to-teal-700 px-4 py-2.5 text-sm font-medium text-white shadow-md transition hover:from-teal-700 hover:to-teal-800 hover:shadow-lg"
+                  >
+                    View Property
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             </div>
-
-            <div className="flex flex-col gap-1">
-              <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Rooms
-              </span>
-              <div className="flex items-center gap-2 text-sm text-slate-700">
-                <BedDouble className="h-4 w-4 shrink-0 text-teal-600" />
-                {currentProperty.rooms || 0} Rooms
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Capacity
-              </span>
-              <div className="flex items-center gap-2 text-sm text-slate-700">
-                <Users className="h-4 w-4 shrink-0 text-teal-600" />
-                {currentProperty.totalCapacity ||
-                  (currentProperty.rooms || 0) *
-                    (currentProperty.peoplePerRoom || 1)}
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <span className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                Rent / Room
-              </span>
-              <div className="flex items-center gap-2 text-sm text-slate-700">
-                <DollarSign className="h-4 w-4 shrink-0 text-teal-600" />
-                {formatCurrency(currentProperty.rent)}
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-6">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-              Expected Monthly Rent (This Property)
-            </p>
-            <p className="mt-1 text-2xl font-bold text-slate-900">
-              {formatCurrency(
-                currentProperty.totalPotentialRent ||
-                  (currentProperty.rooms || 0) * (currentProperty.rent || 0)
-              )}
-            </p>
-
-            {currentProperty.inviteCode && (
-              <p className="mt-2 text-xs text-slate-500">
-                Invite code:{" "}
-                <span className="rounded bg-teal-50 px-1.5 py-0.5 font-mono font-semibold text-teal-700">
-                  {currentProperty.inviteCode}
-                </span>
+          ) : (
+            <div className="mb-8 rounded-xl border border-dashed border-slate-300 bg-white p-12 text-center">
+              <Building2 className="mx-auto h-12 w-12 text-slate-300" />
+              <h3 className="mt-4 text-lg font-semibold text-slate-800">
+                No properties yet
+              </h3>
+              <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
+                Create your first property to see live stats, occupancy, rent and
+                health score.
               </p>
-            )}
-          </div>
-        </div>
-
-        <button
-          onClick={() => navigate("/property")}
-          className="mt-6 flex w-fit items-center gap-2 rounded-lg bg-gradient-to-r from-teal-600 to-teal-700 px-4 py-2.5 text-sm font-medium text-white shadow-md transition hover:from-teal-700 hover:to-teal-800 hover:shadow-lg"
-        >
-          View Property
-          <ChevronRight className="h-4 w-4" />
-        </button>
-      </div>
-    </div>
-  </div>
-) : (
-  <div className="mb-8 rounded-xl border border-dashed border-slate-300 bg-white p-12 text-center">
-    <Building2 className="mx-auto h-12 w-12 text-slate-300" />
-    <h3 className="mt-4 text-lg font-semibold text-slate-800">
-      No properties yet
-    </h3>
-    <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
-      Create your first property to see live stats, occupancy, rent and
-      health score.
-    </p>
-    <button
-      onClick={() => navigate("/property")}
-      className="mt-6 inline-flex items-center gap-2 rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-teal-700"
-    >
-      <Plus className="h-4 w-4" />
-      Create Your First Property
-    </button>
-  </div>
-)}
+              <button
+                onClick={() => navigate("/property")}
+                className="mt-6 inline-flex items-center gap-2 rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-teal-700"
+              >
+                <Plus className="h-4 w-4" />
+                Create Your First Property
+              </button>
+            </div>
+          )}
 
           {/* Rent summary + Needs Attention */}
           <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -807,7 +826,9 @@ const ManagerDashboard = () => {
                 <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-teal-500 to-teal-600 transition-all"
-                    style={{ width: `${Math.min(rentStats.collectionRate, 100)}%` }}
+                    style={{
+                      width: `${Math.min(rentStats.collectionRate, 100)}%`,
+                    }}
                   />
                 </div>
               </div>
@@ -1019,7 +1040,9 @@ const ManagerDashboard = () => {
                   <span className="text-slate-600">Overdue rent</span>
                   <span
                     className={`font-semibold ${
-                      rentStats.overdue > 0 ? "text-red-600" : "text-emerald-600"
+                      rentStats.overdue > 0
+                        ? "text-red-600"
+                        : "text-emerald-600"
                     }`}
                   >
                     {rentStats.overdue > 0

@@ -10,6 +10,7 @@ import ResetPassword from "./pages/auth/ResetPassword";
 import ManagerDashboard from "./Property Manager/ManagerDashboard";
 import Property from "./Property Manager/Property";
 import RentPage from "./Property Manager/RentPage";
+import ExpensesPage from "./Property Manager/ExpensesPage";
 
 // Roommate
 import JoinProperty from "./Roommate/JoinProperty";
@@ -22,10 +23,25 @@ function App() {
         {/* =========================
             Authentication
         ========================= */}
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        <Route path="/forgot-password" element={<ForgotPassword />} />
-        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route
+          path="/login"
+          element={<Login />}
+        />
+
+        <Route
+          path="/register"
+          element={<Register />}
+        />
+
+        <Route
+          path="/forgot-password"
+          element={<ForgotPassword />}
+        />
+
+        <Route
+          path="/reset-password"
+          element={<ResetPassword />}
+        />
 
         {/* =========================
             Property Manager
@@ -47,6 +63,12 @@ function App() {
         <Route
           path="/rent"
           element={<RentPage />}
+        />
+
+        {/* Expenses */}
+        <Route
+          path="/manager/expenses"
+          element={<ExpensesPage />}
         />
 
         {/* =========================

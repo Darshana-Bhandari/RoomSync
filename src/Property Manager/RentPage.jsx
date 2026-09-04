@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+
 import {
   Search,
   Plus,
@@ -15,6 +16,7 @@ import {
   CreditCard,
   FileText,
   Send,
+  House,
 } from "lucide-react";
 
 // ==================== MOCK DATA ====================
@@ -475,60 +477,91 @@ export default function RentPage() {
       )}
 
       <div className="max-w-7xl mx-auto space-y-6">
-        {/* ========== HEADER ========== */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Rent Management</h1>
-            <p className="text-sm text-slate-500 mt-1">
-              Manage monthly rent, payments & payment history
-            </p>
-          </div>
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg px-2 py-1.5 shadow-sm">
-              <button
-                onClick={() => changeMonth(-1)}
-                className="p-1.5 rounded-md hover:bg-slate-100 text-slate-600"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <span className="text-sm font-medium text-slate-800 min-w-[120px] text-center">
-                {getMonthLabel(selectedMonth)}
-              </span>
-              <button
-                onClick={() => changeMonth(1)}
-                className="p-1.5 rounded-md hover:bg-slate-100 text-slate-600"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-            <button
-              onClick={() => {
-                setSelectedResidents(MOCK_RESIDENTS.map((r) => r.id));
-                setShowGenerateModal(true);
-              }}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg shadow-sm transition"
-            >
-              <Plus className="w-4 h-4" />
-              Generate Rent
-            </button>
-            <button
-              onClick={() => {
-                setPaymentForm({
-                  residentId: "",
-                  paidAmount: "",
-                  paymentDate: new Date().toISOString().slice(0, 10),
-                  paymentMethod: "Cash",
-                  note: "",
-                });
-                setShowRecordModal(true);
-              }}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-sm font-medium rounded-lg shadow-sm transition"
-            >
-              <CreditCard className="w-4 h-4" />
-              Record Payment
-            </button>
-          </div>
-        </div>
+       
+
+       {/* ========== HEADER ========== */}
+<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+
+  {/* Logo + Title */}
+  <div className="flex items-center gap-4">
+
+    {/* RoomSync Logo */}
+    <div className="w-12 h-12 bg-teal-600 rounded-xl flex items-center justify-center shadow-sm">
+      <House className="w-7 h-7 text-white" strokeWidth={2} />
+    </div>
+
+    <div>
+      <h1 className="text-2xl font-bold text-slate-900">
+        Rent Management
+      </h1>
+
+      <p className="text-sm text-slate-500 mt-1">
+        Manage monthly rent, payments & payment history
+      </p>
+    </div>
+
+  </div>
+
+  {/* Month + Buttons */}
+  <div className="flex items-center gap-3 flex-wrap">
+
+    {/* Month Selector */}
+    <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg px-2 py-1.5 shadow-sm">
+
+      <button
+        onClick={() => changeMonth(-1)}
+        className="p-1.5 rounded-md hover:bg-slate-100 text-slate-600"
+      >
+        <ChevronLeft className="w-4 h-4" />
+      </button>
+
+      <span className="text-sm font-medium text-slate-800 min-w-[120px] text-center">
+        {getMonthLabel(selectedMonth)}
+      </span>
+
+      <button
+        onClick={() => changeMonth(1)}
+        className="p-1.5 rounded-md hover:bg-slate-100 text-slate-600"
+      >
+        <ChevronRight className="w-4 h-4" />
+      </button>
+
+    </div>
+
+    {/* Generate Rent */}
+    <button
+      onClick={() => {
+        setSelectedResidents(MOCK_RESIDENTS.map((r) => r.id));
+        setShowGenerateModal(true);
+      }}
+      className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg shadow-sm transition"
+    >
+      <Plus className="w-4 h-4" />
+      Generate Rent
+    </button>
+
+    {/* Record Payment */}
+    <button
+      onClick={() => {
+        setPaymentForm({
+          residentId: "",
+          paidAmount: "",
+          paymentDate: new Date().toISOString().slice(0, 10),
+          paymentMethod: "Cash",
+          note: "",
+        });
+
+        setShowRecordModal(true);
+      }}
+      className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-sm font-medium rounded-lg shadow-sm transition"
+    >
+      <CreditCard className="w-4 h-4" />
+      Record Payment
+    </button>
+
+  </div>
+
+</div>
 
         {/* ========== SUMMARY CARDS ========== */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
