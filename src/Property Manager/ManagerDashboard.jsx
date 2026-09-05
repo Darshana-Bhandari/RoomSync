@@ -10,7 +10,6 @@ import {
   Wallet,
   ClipboardList,
   BarChart3,
-  LineChart,
   Bell,
   Settings,
   Plus,
@@ -19,13 +18,11 @@ import {
   ChevronRight,
   AlertCircle,
   CheckCircle2,
-  Clock,
   TrendingUp,
-  ChevronLeft,
-  Zap,
   TrendingDown,
   Activity,
   Loader2,
+  Zap,
 } from "lucide-react";
 import { loadProperties } from "../utils/propertyStorage"; // adjust path
 
@@ -352,45 +349,19 @@ const ManagerDashboard = () => {
     ]
   );
 
-  // ---------- Nav ----------
+  // ---------- Nav (NEW flat architecture) ----------
   const navItems = [
-    {
-      section: "MAIN",
-      items: [
-        { icon: Home, label: "Dashboard", path: "/manager-dashboard" },
-      ],
-    },
-    {
-      section: "PROPERTY",
-      items: [
-        { icon: Building2, label: "Properties", path: "/property" },
-        { icon: DoorOpen, label: "Rooms", path: "/manager/rooms" },
-        { icon: Users, label: "Residents", path: "/manager/residents" },
-      ],
-    },
-    {
-      section: "FINANCE",
-      items: [
-        { icon: DollarSign, label: "Rent", path: "/rent" },
-        { icon: Receipt, label: "Bills", path: "/manager/bills" },
-        { icon: Wallet, label: "Expenses", path: "/manager/expenses" },
-      ],
-    },
-    {
-      section: "MANAGEMENT",
-      items: [
-        { icon: ClipboardList, label: "Chores", path: "/manager/chores" },
-        { icon: BarChart3, label: "Reports", path: "/manager/reports" },
-        { icon: LineChart, label: "Analytics", path: "/manager/analytics" },
-      ],
-    },
-    {
-      section: "SYSTEM",
-      items: [
-        { icon: Bell, label: "Notifications", path: "/manager/notifications" },
-        { icon: Settings, label: "Settings", path: "/manager/settings" },
-      ],
-    },
+    { icon: Home, label: "Dashboard", path: "/manager-dashboard" },
+    { icon: Building2, label: "Properties", path: "/property" },
+    { icon: DoorOpen, label: "Rooms", path: "/manager/rooms" },
+    { icon: Users, label: "Residents", path: "/manager/residents" },
+    { icon: DollarSign, label: "Rent", path: "/rent" },
+    { icon: Receipt, label: "Bills", path: "/manager/bills" },
+    { icon: Wallet, label: "Expenses", path: "/manager/expenses" },
+    { icon: ClipboardList, label: "Reports", path: "/manager/reports" },
+    { icon: BarChart3, label: "Analytics", path: "/manager/analytics" },
+    { icon: Bell, label: "Notifications", path: "/manager/notifications" },
+    { icon: Settings, label: "Settings", path: "/manager/settings" },
   ];
 
   const quickActions = [
@@ -449,41 +420,34 @@ const ManagerDashboard = () => {
         </div>
 
         <nav className="flex-1 overflow-y-auto px-3 py-4">
-          {navItems.map((group) => (
-            <div key={group.section} className="mb-5">
-              <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
-                {group.section}
-              </p>
-              <ul className="space-y-1">
-                {group.items.map((item) => {
-                  const Icon = item.icon;
-                  const isActive = location.pathname === item.path;
-                  return (
-                    <li key={item.label}>
-                      <button
-                        onClick={() => navigate(item.path)}
-                        className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
-                          isActive
-                            ? "bg-teal-50 text-teal-700 shadow-sm"
-                            : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                        }`}
-                      >
-                        <Icon
-                          className={`h-4.5 w-4.5 ${
-                            isActive ? "text-teal-600" : "text-slate-400"
-                          }`}
-                        />
-                        <span>{item.label}</span>
-                        {isActive && (
-                          <ChevronRight className="ml-auto h-4 w-4" />
-                        )}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ))}
+          <ul className="space-y-1">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = location.pathname === item.path;
+              return (
+                <li key={item.label}>
+                  <button
+                    onClick={() => navigate(item.path)}
+                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
+                      isActive
+                        ? "bg-teal-50 text-teal-700 shadow-sm"
+                        : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                    }`}
+                  >
+                    <Icon
+                      className={`h-4.5 w-4.5 ${
+                        isActive ? "text-teal-600" : "text-slate-400"
+                      }`}
+                    />
+                    <span>{item.label}</span>
+                    {isActive && (
+                      <ChevronRight className="ml-auto h-4 w-4" />
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
         </nav>
 
         <div className="border-t border-slate-100 px-3 py-4">
@@ -625,18 +589,11 @@ const ManagerDashboard = () => {
                       alt={currentProperty.name || "Property"}
                       className="absolute inset-0 h-full w-full object-cover"
                       onError={(e) => {
-                        console.error(
-                          "Property image failed to load:",
-                          currentProperty.coverUrl?.substring(0, 50)
-                        );
-
                         e.currentTarget.style.display = "none";
-
                         const fallback =
                           e.currentTarget.parentElement?.querySelector(
                             ".property-image-fallback"
                           );
-
                         if (fallback) {
                           fallback.classList.remove("hidden");
                         }
@@ -1104,7 +1061,7 @@ const ManagerDashboard = () => {
                     onClick={() => navigate(action.path)}
                     className="flex items-center gap-2 rounded-lg border border-teal-200 bg-gradient-to-r from-teal-50 to-teal-100 px-4 py-2.5 text-sm font-semibold text-teal-700 transition hover:border-teal-300 hover:shadow-md"
                   >
-                    <Plus className="h-4 w-4" />
+                    <Icon className="h-4 w-4" />
                     {action.label}
                   </button>
                 );
