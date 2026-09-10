@@ -26,9 +26,7 @@ import {
   Sparkles,
   Loader2,
 } from "lucide-react";
-import { addProperty, updateProperty } from "../utils/propertyStorage";
-// If propertyStorage.js is in the same folder, use:
-// import { addProperty, updateProperty } from "./propertyStorage";
+import { addProperty, updateProperty, notifyPropertiesUpdated } from "../utils/propertyStorage";
 
 const PROPERTY_TYPES = [
   "Shared House",
@@ -343,8 +341,12 @@ const Property = () => {
     }
 
     setAvailability("checking");
+
     const timer = setTimeout(() => {
-      const taken = TAKEN_CODES.includes(inviteCode.replace(/-/g, ""));
+      const taken = TAKEN_CODES.includes(
+        inviteCode.replace(/-/g, "")
+      );
+
       setAvailability(taken ? "taken" : "available");
     }, 500);
 
@@ -527,7 +529,7 @@ const Property = () => {
 
         photoCount: photos.length,
 
-        // Main property image
+        // Main property image - Base64 encoded for persistence
         coverUrl: coverUrl || null,
 
         // Keep image aliases for other pages/components
@@ -569,6 +571,7 @@ const Property = () => {
 
       addProperty(newProperty);
       setCreatedProperty(newProperty);
+      notifyPropertiesUpdated();
       setStage("success");
     } catch (err) {
       setErrors({
@@ -598,6 +601,7 @@ const Property = () => {
 
       if (createdProperty?.id) {
         updateProperty(createdProperty.id, { inviteCode });
+        notifyPropertiesUpdated();
       }
 
       setSavedCode(inviteCode);

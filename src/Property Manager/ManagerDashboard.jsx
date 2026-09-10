@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   Home,
@@ -23,8 +23,14 @@ import {
   Activity,
   Loader2,
   Zap,
+  MoreVertical,
+  Pencil,
+  Key,
+  Trash2,
+  X,
+  Images,
 } from "lucide-react";
-import { loadProperties } from "../utils/propertyStorage"; // adjust path
+import { loadProperties, deleteProperty } from "../utils/propertyStorage"; // adjust path
 
 // ---------- helpers ----------
 const getGreeting = () => {
@@ -37,6 +43,72 @@ const getGreeting = () => {
 const formatCurrency = (n) =>
   `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
+/**
+ * Get the first valid image URL from a property
+ * Tries multiple fields and validates the URL
+ */
+const getPropertyCoverImage = (property) => {
+  if (!property) return "";
+
+  // Try each image field in order of preference
+  const imageUrl =
+    property?.coverUrl ||
+    property?.imageUrl ||
+    property?.image ||
+    "";
+
+  // Validate that it's not a blob URL (which would be invalid after refresh)
+  if (imageUrl && imageUrl.startsWith("blob:")) {
+    console.warn(
+      `[ManagerDashboard] Invalid blob URL detected for property "${property?.name}" (ID: ${property?.id}). Image URL: ${imageUrl.slice(0, 50)}...`
+    );
+    return "";
+  }
+  return imageUrl;
+};
+
+const PropertyImageSection = ({ currentProperty }) => {
+  const coverImage = getPropertyCoverImage(currentProperty);
+
+  if (coverImage) {
+    return (
+      <>
+        <img
+          src={coverImage}
+          alt={currentProperty?.name || "Property"}
+          className="absolute inset-0 h-full w-full object-cover"
+          onError={(e) => {
+            console.error(
+              `[ManagerDashboard] Failed to load image for property "${currentProperty?.name}" (ID: ${currentProperty?.id}). URL: ${coverImage.slice(0, 50)}...`
+            );
+            e.target.style.display = "none";
+            const fallback =
+              e.target.parentElement?.querySelector(".property-image-fallback");
+            if (fallback) {
+              fallback.classList.remove("hidden");
+            }
+          }}
+        />
+        <div className="property-image-fallback relative z-10 hidden flex-col items-center gap-2">
+          <Images className="h-12 w-12 text-teal-300" />
+          <span className="text-xs font-medium text-teal-600/70">
+            No cover photo
+          </span>
+          <p className="text-xs text-slate-500">Upload a photo to display here</p>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <div className="property-image-fallback relative z-10 flex flex-col items-center gap-2">
+      <Images className="h-12 w-12 text-teal-300" />
+      <span className="text-xs font-medium text-teal-600/70">No cover photo</span>
+      <p className="text-xs text-slate-500">Upload a photo to display here</p>
+    </div>
+  );
+};
+
 const ManagerDashboard = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -45,6 +117,12 @@ const ManagerDashboard = () => {
   const [selectedPropertyId, setSelectedPropertyId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Property Actions menu + Delete modal
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const actionsRef = useRef(null);
 
   // Load + live refresh when Property page saves
   useEffect(() => {
@@ -81,6 +159,17 @@ const ManagerDashboard = () => {
     }
   }, [properties, selectedPropertyId]);
 
+  // Close actions menu on outside click
+  useEffect(() => {
+    const handleClick = (e) => {
+      if (actionsRef.current && !actionsRef.current.contains(e.target)) {
+        setActionsOpen(false);
+      }
+    };
+    if (actionsOpen) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [actionsOpen]);
+
   const currentProperty = useMemo(() => {
     if (!selectedPropertyId) return null;
     return (
@@ -90,6 +179,31 @@ const ManagerDashboard = () => {
   }, [properties, selectedPropertyId]);
 
   const hasProperties = properties.length > 0;
+
+  // ---------- Delete handler ----------
+  const handleDeleteProperty = async () => {
+    if (!currentProperty) return;
+    setDeleting(true);
+    try {
+      const remaining = deleteProperty(currentProperty.id);
+      setProperties(remaining);
+
+      // Auto-select another property or clear
+      if (remaining.length > 0) {
+        setSelectedPropertyId(remaining[0].id);
+      } else {
+        setSelectedPropertyId(null);
+      }
+
+      setDeleteModalOpen(false);
+      setActionsOpen(false);
+    } catch (err) {
+      console.error(err);
+      setError("Failed to delete property.");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   // ---------- Aggregate stats across all properties ----------
   const totalRooms = useMemo(
@@ -248,7 +362,6 @@ const ManagerDashboard = () => {
       });
     });
 
-    // Sort high severity first
     return items.sort((a, b) =>
       a.severity === "high" && b.severity !== "high" ? -1 : 1
     );
@@ -275,7 +388,6 @@ const ManagerDashboard = () => {
         };
       });
     }
-    // Fallback: empty rooms from property.rooms count
     return Array.from({ length: Number(currentProperty.rooms) || 0 }, (_, i) => ({
       name: `Room ${101 + i}`,
       status: "empty",
@@ -292,7 +404,6 @@ const ManagerDashboard = () => {
         all.push({ ...a, propertyName: p.name });
       });
     });
-    // newest first (simple)
     return all.slice(0, 6);
   }, [properties]);
 
@@ -349,7 +460,7 @@ const ManagerDashboard = () => {
     ]
   );
 
-  // ---------- Nav (NEW flat architecture) ----------
+  // ---------- Nav ----------
   const navItems = [
     { icon: Home, label: "Dashboard", path: "/manager-dashboard" },
     { icon: Building2, label: "Properties", path: "/property" },
@@ -510,6 +621,7 @@ const ManagerDashboard = () => {
               </p>
             </div>
             <div className="flex items-center gap-3">
+              {/* Clean property selector — names only */}
               {hasProperties && (
                 <select
                   className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none focus:border-teal-400"
@@ -583,37 +695,7 @@ const ManagerDashboard = () => {
               <div className="flex flex-col lg:flex-row">
                 {/* LEFT: Property Cover */}
                 <div className="relative flex h-56 w-full shrink-0 items-center justify-center overflow-hidden bg-gradient-to-br from-teal-100 via-emerald-50 to-slate-100 lg:h-auto lg:min-h-[240px] lg:w-2/5">
-                  {currentProperty.coverUrl ? (
-                    <img
-                      src={currentProperty.coverUrl}
-                      alt={currentProperty.name || "Property"}
-                      className="absolute inset-0 h-full w-full object-cover"
-                      onError={(e) => {
-                        e.currentTarget.style.display = "none";
-                        const fallback =
-                          e.currentTarget.parentElement?.querySelector(
-                            ".property-image-fallback"
-                          );
-                        if (fallback) {
-                          fallback.classList.remove("hidden");
-                        }
-                      }}
-                    />
-                  ) : null}
-
-                  {/* Fallback */}
-                  <div
-                    className={`property-image-fallback relative z-10 flex flex-col items-center gap-2 ${
-                      currentProperty.coverUrl ? "hidden" : ""
-                    }`}
-                  >
-                    <Building2 className="h-16 w-16 text-teal-300" />
-                    <span className="text-xs font-medium text-teal-600/70">
-                      No cover photo
-                    </span>
-                  </div>
-
-                  {/* Overlay */}
+                  <PropertyImageSection currentProperty={currentProperty} />
                   <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/5 to-transparent" />
                 </div>
 
@@ -624,9 +706,68 @@ const ManagerDashboard = () => {
                       <h2 className="text-xl font-bold text-slate-900">
                         🏡 {currentProperty.name}
                       </h2>
-                      <span className="rounded-full bg-teal-100 px-3 py-1 text-xs font-semibold text-teal-700">
-                        {currentProperty.type || "Property"}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-full bg-teal-100 px-3 py-1 text-xs font-semibold text-teal-700">
+                          {currentProperty.type || "Property"}
+                        </span>
+
+                        {/* Property Actions (⋮) */}
+                        <div className="relative" ref={actionsRef}>
+                          <button
+                            onClick={() => setActionsOpen((v) => !v)}
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-700"
+                            aria-label="Property actions"
+                          >
+                            <MoreVertical className="h-4 w-4" />
+                          </button>
+
+                          {actionsOpen && (
+                            <div className="absolute right-0 top-full z-20 mt-1 w-52 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                              <button
+                                onClick={() => {
+                                  setActionsOpen(false);
+                                  navigate("/property");
+                                }}
+                                className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+                              >
+                                <Pencil className="h-4 w-4 text-slate-400" />
+                                Edit Property
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setActionsOpen(false);
+                                  navigate("/manager/residents");
+                                }}
+                                className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+                              >
+                                <Users className="h-4 w-4 text-slate-400" />
+                                Manage Residents
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setActionsOpen(false);
+                                  navigate("/property"); // or a dedicated invite-code route
+                                }}
+                                className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+                              >
+                                <Key className="h-4 w-4 text-slate-400" />
+                                Manage Invite Code
+                              </button>
+                              <div className="my-1 border-t border-slate-100" />
+                              <button
+                                onClick={() => {
+                                  setActionsOpen(false);
+                                  setDeleteModalOpen(true);
+                                }}
+                                className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm text-red-600 hover:bg-red-50"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                Delete Property
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
 
                     <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -698,13 +839,15 @@ const ManagerDashboard = () => {
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => navigate("/property")}
-                    className="mt-6 flex w-fit items-center gap-2 rounded-lg bg-gradient-to-r from-teal-600 to-teal-700 px-4 py-2.5 text-sm font-medium text-white shadow-md transition hover:from-teal-700 hover:to-teal-800 hover:shadow-lg"
-                  >
-                    View Property
-                    <ChevronRight className="h-4 w-4" />
-                  </button>
+                  <div className="mt-6 flex flex-wrap items-center gap-3">
+                    <button
+                      onClick={() => navigate("/property")}
+                      className="flex w-fit items-center gap-2 rounded-lg bg-gradient-to-r from-teal-600 to-teal-700 px-4 py-2.5 text-sm font-medium text-white shadow-md transition hover:from-teal-700 hover:to-teal-800 hover:shadow-lg"
+                    >
+                      View Property
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -791,7 +934,6 @@ const ManagerDashboard = () => {
               </div>
             </div>
 
-            {/* Needs Attention */}
             <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="mb-4 flex items-center gap-2 text-base font-semibold text-slate-800">
                 <AlertCircle className="h-5 w-5 text-red-600" />
@@ -863,7 +1005,6 @@ const ManagerDashboard = () => {
 
           {/* Bottom row */}
           <div className="mb-8 grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
-            {/* Recent Rent */}
             <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="mb-4 flex items-center gap-2 text-base font-semibold text-slate-800">
                 <DollarSign className="h-5 w-5 text-teal-600" />
@@ -904,7 +1045,6 @@ const ManagerDashboard = () => {
               </button>
             </div>
 
-            {/* Occupancy */}
             <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="mb-4 flex items-center gap-2 text-base font-semibold text-slate-800">
                 <BedDouble className="h-5 w-5 text-teal-600" />
@@ -954,7 +1094,6 @@ const ManagerDashboard = () => {
               )}
             </div>
 
-            {/* Health Score */}
             <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="mb-4 flex items-center gap-2 text-base font-semibold text-slate-800">
                 <CheckCircle2 className="h-5 w-5 text-teal-600" />
@@ -1010,7 +1149,6 @@ const ManagerDashboard = () => {
               </ul>
             </div>
 
-            {/* Recent Activity */}
             <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="mb-4 flex items-center gap-2 text-base font-semibold text-slate-800">
                 <Activity className="h-5 w-5 text-teal-600" />
@@ -1070,6 +1208,77 @@ const ManagerDashboard = () => {
           </div>
         </main>
       </div>
+
+      {/* ========== Delete Confirmation Modal ========== */}
+      {deleteModalOpen && currentProperty && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b border-slate-100 px-6 py-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-100">
+                  <Trash2 className="h-5 w-5 text-red-600" />
+                </div>
+                <h3 className="text-lg font-semibold text-slate-900">
+                  Delete Property?
+                </h3>
+              </div>
+              <button
+                onClick={() => setDeleteModalOpen(false)}
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="px-6 py-5">
+              <p className="text-sm text-slate-700">
+                Are you sure you want to delete{" "}
+                <span className="font-semibold text-slate-900">
+                  “{currentProperty.name}”
+                </span>
+                ?
+              </p>
+              <p className="mt-3 text-sm text-slate-600">
+                Deleting this property will also remove its{" "}
+                <strong>rooms</strong>, <strong>resident assignments</strong>,{" "}
+                <strong>rent records</strong>, <strong>bills</strong>,{" "}
+                <strong>expenses</strong> and <strong>invitation code</strong>.
+              </p>
+              <p className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                This action cannot be undone.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4">
+              <button
+                onClick={() => setDeleteModalOpen(false)}
+                disabled={deleting}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteProperty}
+                disabled={deleting}
+                className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
+              >
+                {deleting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Deleting…
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4" />
+                    Delete Property
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

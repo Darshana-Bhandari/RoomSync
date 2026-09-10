@@ -11,9 +11,7 @@ import {
   AlertCircle,
   IndianRupee,
   Users,
-  Calendar,
   CreditCard,
-  FileText,
   Send,
   House,
 } from "lucide-react";

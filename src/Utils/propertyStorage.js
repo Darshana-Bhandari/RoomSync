@@ -1,117 +1,162 @@
 const STORAGE_KEY = "roomsync_properties";
 
-export function loadProperties() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const list = raw ? JSON.parse(raw) : [];
-    return Array.isArray(list) ? list : [];
-  } catch {
-    return [];
+/**
+ * Validates if an image URL is usable (not a blob URL, not null/empty)
+ * Blob URLs like blob:http://... are temporary and should not be stored
+ */
+const isValidImageUrl = (url) => {
+  if (!url || typeof url !== "string") return false;
+  if (url.startsWith("blob:")) {
+    console.warn(
+      "[propertyStorage] Invalid blob URL detected in storage:",
+      url,
+      "— Please re-upload the photo for this property."
+    );
+    return false;
   }
-}
-
-export function saveProperties(list) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-  // Notify dashboard (and any other listeners)
-  window.dispatchEvent(new Event("propertiesUpdated"));
-}
-
-export function addProperty(property) {
-  const list = loadProperties();
-  // Enrich with empty nested collections so dashboard never crashes
-  const enriched = {
-    ...property,
-    roomsList: property.roomsList || [],
-    residents: property.residents || [],
-    bills: property.bills || [],
-    expenses: property.expenses || [],
-    chores: property.chores || [],
-    activities: property.activities || [],
-    occupiedCapacity: property.occupiedCapacity || 0,
-  };
-  const next = [...list, enriched];
-  saveProperties(next);
-  return next;
-}
-
-export function updateProperty(id, patch) {
-  const list = loadProperties();
-  const next = list.map((p) =>
-    p.id === id ? { ...p, ...patch } : p
-  );
-  saveProperties(next);
-  return next;
-}
-
-export function getPropertyById(id) {
-  return loadProperties().find((p) => String(p.id) === String(id)) || null;
-}
+  return true;
+};
 
 /**
- * Optional helper: seed demo rooms/residents for a newly created property
- * so the dashboard isn't empty. Call from Property.js after create if you want.
+ * Migrates old properties with blob URLs or missing image fields
+ * This ensures old properties don't break the dashboard
  */
-export function seedDemoDataForProperty(propertyId) {
-  const list = loadProperties();
-  const property = list.find((p) => p.id === propertyId);
-  if (!property) return list;
+const migratePropertyImages = (property) => {
+  if (!property) return property;
 
-  const roomCount = Number(property.rooms) || 0;
-  const capacityPerRoom = Number(property.peoplePerRoom) || 1;
-  const rentPerRoom = Number(property.rent) || 0;
+  const migrated = { ...property };
 
-  const roomsList = Array.from({ length: roomCount }, (_, i) => ({
-    id: `room-${propertyId}-${i + 1}`,
-    name: `Room ${101 + i}`,
-    capacity: capacityPerRoom,
-    residentsCount: 0,
-  }));
-
-  // Put a couple of demo residents so occupancy/rent stats work
-  const residents = [];
-  if (roomCount > 0) {
-    residents.push({
-      id: `res-${propertyId}-1`,
-      name: "Demo Resident 1",
-      roomId: roomsList[0].id,
-      roomName: roomsList[0].name,
-      rent: Math.round(rentPerRoom / capacityPerRoom) || rentPerRoom,
-      rentStatus: "PAID",
-      paidAmount: Math.round(rentPerRoom / capacityPerRoom) || rentPerRoom,
-    });
-    roomsList[0].residentsCount = 1;
+  // Check if any image field has an invalid blob URL
+  if (!isValidImageUrl(migrated.coverUrl)) {
+    migrated.coverUrl = null;
   }
-  if (roomCount > 1) {
-    residents.push({
-      id: `res-${propertyId}-2`,
-      name: "Demo Resident 2",
-      roomId: roomsList[1].id,
-      roomName: roomsList[1].name,
-      rent: Math.round(rentPerRoom / capacityPerRoom) || rentPerRoom,
-      rentStatus: "OVERDUE",
-      paidAmount: 0,
-    });
-    roomsList[1].residentsCount = 1;
+  if (!isValidImageUrl(migrated.imageUrl)) {
+    migrated.imageUrl = null;
+  }
+  if (!isValidImageUrl(migrated.image)) {
+    migrated.image = null;
   }
 
-  const occupiedCapacity = residents.length;
-  const activities = [
-    {
-      id: `act-${propertyId}-1`,
-      type: "property",
-      title: "Property created",
-      description: `${property.name} was added`,
-      time: "Just now",
-    },
-  ];
+  // Log if an old property lost its image due to blob URL
+  if (property.coverUrl && !migrated.coverUrl && property.coverUrl.startsWith("blob:")) {
+    console.info(
+      `[propertyStorage] Cleared invalid blob URL for property "${property.name}" (ID: ${property.id}). User should re-upload the photo.`
+    );
+  }
 
-  return updateProperty(propertyId, {
-    roomsList,
-    residents,
-    occupiedCapacity,
-    activities,
-    bills: [],
-    expenses: [],
-    chores: [],
-  });
-}
+  return migrated;
+};
+
+/**
+ * Load all properties from localStorage
+ * Applies migration to clean up old blob URLs
+ */
+export const loadProperties = () => {
+  try {
+    const data = localStorage.getItem(STORAGE_KEY);
+    if (!data) return [];
+
+    let properties = JSON.parse(data);
+
+    // Apply migration to all properties
+    properties = properties.map(migratePropertyImages);
+
+    return properties;
+  } catch (error) {
+    console.error("[propertyStorage] Error loading properties:", error);
+    return [];
+  }
+};
+
+/**
+ * Save all properties to localStorage
+ */
+export const saveProperties = (properties) => {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(properties));
+  } catch (error) {
+    console.error("[propertyStorage] Error saving properties:", error);
+    if (error.name === "QuotaExceededError") {
+      console.error(
+        "[propertyStorage] localStorage quota exceeded. Consider archiving old properties."
+      );
+    }
+  }
+};
+
+/**
+ * Add a new property
+ * Validates that image URLs are not blob URLs before saving
+ */
+export const addProperty = (property) => {
+  if (!property || !property.id) {
+    console.error("[propertyStorage] Invalid property object");
+    return;
+  }
+
+  // Ensure coverUrl is a valid persistent image (Base64 or https URL, not blob)
+  if (property.coverUrl && property.coverUrl.startsWith("blob:")) {
+    console.warn(
+      "[propertyStorage] Attempted to save blob URL as coverUrl. This will not persist. Use Base64 data URLs instead."
+    );
+    property.coverUrl = null;
+  }
+
+  const properties = loadProperties();
+  properties.push(property);
+  saveProperties(properties);
+};
+
+/**
+ * Update an existing property
+ */
+export const updateProperty = (id, updates) => {
+  const properties = loadProperties();
+  const index = properties.findIndex((p) => p.id === id);
+
+  if (index === -1) {
+    console.error(`[propertyStorage] Property with ID ${id} not found`);
+    return;
+  }
+
+  // Validate image URLs before updating
+  if (updates.coverUrl && updates.coverUrl.startsWith("blob:")) {
+    console.warn(
+      "[propertyStorage] Attempted to save blob URL as coverUrl. This will not persist. Use Base64 data URLs instead."
+    );
+    updates.coverUrl = null;
+  }
+
+  properties[index] = { ...properties[index], ...updates };
+  saveProperties(properties);
+};
+
+/**
+ * Get a single property by ID
+ */
+export const getPropertyById = (id) => {
+  const properties = loadProperties();
+  const property = properties.find((p) => p.id === id);
+  return property ? migratePropertyImages(property) : null;
+};
+
+/**
+ * Delete a property by ID
+ */
+export const deleteProperty = (id) => {
+  const properties = loadProperties();
+  const filtered = properties.filter((p) => p.id !== id);
+  saveProperties(filtered);
+};
+
+/**
+ * Dispatch a custom event when properties are updated
+ * Allows other components to react to property changes
+ */
+export const notifyPropertiesUpdated = () => {
+  window.dispatchEvent(
+    new CustomEvent("propertiesUpdated", {
+      detail: { timestamp: new Date().toISOString() },
+    })
+  );
+};
