@@ -726,7 +726,12 @@ const ManagerDashboard = () => {
                               <button
                                 onClick={() => {
                                   setActionsOpen(false);
-                                  navigate("/property");
+                                  navigate("/property", {
+                                    state: {
+                                      mode: "edit",
+                                      propertyId: currentProperty.id,
+                                    },
+                                  });
                                 }}
                                 className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50"
                               >
@@ -746,7 +751,13 @@ const ManagerDashboard = () => {
                               <button
                                 onClick={() => {
                                   setActionsOpen(false);
-                                  navigate("/property"); // or a dedicated invite-code route
+
+                                  navigate("/property", {
+                                    state: {
+                                      mode: "manage-invite",
+                                      propertyId: currentProperty.id,
+                                    },
+                                  });
                                 }}
                                 className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50"
                               >

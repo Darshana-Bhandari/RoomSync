@@ -105,30 +105,57 @@ export const addProperty = (property) => {
   const properties = loadProperties();
   properties.push(property);
   saveProperties(properties);
+
+  // Optional: also notify so dashboard refreshes after adding
+  notifyPropertiesUpdated();
 };
 
 /**
  * Update an existing property
+ * Merges updates into the existing object (preserves id, rooms, residents, etc.)
+ * and notifies listeners so the dashboard refreshes automatically.
  */
 export const updateProperty = (id, updates) => {
   const properties = loadProperties();
-  const index = properties.findIndex((p) => p.id === id);
+
+  const index = properties.findIndex(
+    (p) => String(p.id) === String(id)
+  );
 
   if (index === -1) {
-    console.error(`[propertyStorage] Property with ID ${id} not found`);
-    return;
-  }
-
-  // Validate image URLs before updating
-  if (updates.coverUrl && updates.coverUrl.startsWith("blob:")) {
-    console.warn(
-      "[propertyStorage] Attempted to save blob URL as coverUrl. This will not persist. Use Base64 data URLs instead."
+    console.error(
+      `[propertyStorage] Property with ID ${id} not found`
     );
-    updates.coverUrl = null;
+    return false;
   }
 
-  properties[index] = { ...properties[index], ...updates };
+  // Prevent temporary blob URLs from being saved
+  if (
+    updates.coverUrl &&
+    typeof updates.coverUrl === "string" &&
+    updates.coverUrl.startsWith("blob:")
+  ) {
+    console.warn(
+      "[propertyStorage] Blob URL detected. Keeping the existing cover image."
+    );
+
+    updates = {
+      ...updates,
+      coverUrl: properties[index].coverUrl || null,
+    };
+  }
+
+  properties[index] = {
+    ...properties[index],
+    ...updates,
+  };
+
   saveProperties(properties);
+
+  // Tell dashboard and other components to refresh
+  notifyPropertiesUpdated();
+
+  return true;
 };
 
 /**
@@ -136,7 +163,7 @@ export const updateProperty = (id, updates) => {
  */
 export const getPropertyById = (id) => {
   const properties = loadProperties();
-  const property = properties.find((p) => p.id === id);
+  const property = properties.find((p) => String(p.id) === String(id));
   return property ? migratePropertyImages(property) : null;
 };
 
@@ -145,8 +172,9 @@ export const getPropertyById = (id) => {
  */
 export const deleteProperty = (id) => {
   const properties = loadProperties();
-  const filtered = properties.filter((p) => p.id !== id);
+  const filtered = properties.filter((p) => String(p.id) !== String(id));
   saveProperties(filtered);
+  notifyPropertiesUpdated();
 };
 
 /**

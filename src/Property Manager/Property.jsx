@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import {
   Home,
   MapPin,
@@ -26,7 +26,12 @@ import {
   Sparkles,
   Loader2,
 } from "lucide-react";
-import { addProperty, updateProperty, notifyPropertiesUpdated } from "../utils/propertyStorage";
+import {
+  addProperty,
+  updateProperty,
+  getPropertyById,
+  notifyPropertiesUpdated,
+} from "../utils/propertyStorage";
 
 const PROPERTY_TYPES = [
   "Shared House",
@@ -297,7 +302,12 @@ const validateCodeFormat = (code) => {
 
 const Property = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const fileInputRef = useRef(null);
+
+  const isEditMode = location.state?.mode === "edit";
+  const isManageInviteMode = location.state?.mode === "manage-invite";
+  const editingPropertyId = location.state?.propertyId || null;
 
   const [formData, setFormData] = useState({
     name: "",
@@ -314,7 +324,9 @@ const Property = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
-  const [stage, setStage] = useState("form");
+  const [stage, setStage] = useState(
+    location.state?.mode === "manage-invite" ? "invite" : "form"
+  );
   const [createdProperty, setCreatedProperty] = useState(null);
 
   const [inviteCode, setInviteCode] = useState("");
@@ -323,6 +335,50 @@ const Property = () => {
   const [isSavingCode, setIsSavingCode] = useState(false);
   const [savedCode, setSavedCode] = useState("");
   const [isCopied, setIsCopied] = useState(false);
+
+  useEffect(() => {
+    if ((!isEditMode && !isManageInviteMode) || !editingPropertyId) return;
+
+    const existingProperty = getPropertyById(editingPropertyId);
+
+    if (!existingProperty) {
+      console.error("Property not found:", editingPropertyId);
+      navigate("/manager-dashboard", { replace: true });
+      return;
+    }
+
+    // Load existing property details into the form
+    setFormData({
+      name: existingProperty.name || "",
+      address: existingProperty.address || "",
+      type: existingProperty.type || "",
+      rooms: existingProperty.rooms ?? "",
+      description: existingProperty.description || "",
+      peoplePerRoom: existingProperty.peoplePerRoom ?? "",
+      rent: existingProperty.rent ?? "",
+    });
+
+    // Keep the existing invitation code
+    setInviteCode(existingProperty.inviteCode || "");
+    setSavedCode(existingProperty.inviteCode || "");
+
+    // Load existing cover photo
+    if (existingProperty.coverUrl) {
+      setPhotos([
+        {
+          file: null,
+          url: existingProperty.coverUrl,
+        },
+      ]);
+    }
+
+    setCreatedProperty(existingProperty);
+  }, [
+    isEditMode,
+    isManageInviteMode,
+    editingPropertyId,
+    navigate,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -473,8 +529,14 @@ const Property = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
     const validationErrors = validate(formData);
-    setErrors((prev) => ({ ...prev, ...validationErrors }));
+
+    setErrors((prev) => ({
+      ...prev,
+      ...validationErrors,
+    }));
+
     setTouched({
       name: true,
       address: true,
@@ -490,23 +552,80 @@ const Property = () => {
     setIsLoading(true);
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await new Promise((resolve) => setTimeout(resolve, 800));
 
-      // Convert first photo to a smaller base64 so it survives refresh
+      // --------------------------------------------------
+      // EDIT EXISTING PROPERTY
+      // --------------------------------------------------
+      if (isEditMode && editingPropertyId) {
+        const existingProperty = getPropertyById(editingPropertyId);
+
+        if (!existingProperty) {
+          throw new Error("Property could not be found.");
+        }
+
+        let coverUrl = existingProperty.coverUrl || null;
+
+        // Only replace the cover image if user selected a new image
+        if (photos[0]?.file) {
+          try {
+            coverUrl = await fileToDataUrl(photos[0].file);
+          } catch {
+            coverUrl = existingProperty.coverUrl || null;
+          }
+        }
+
+        const updates = {
+          name: formData.name.trim(),
+          address: formData.address.trim(),
+          type: formData.type,
+          rooms: Number(formData.rooms),
+          description: formData.description.trim(),
+          peoplePerRoom: Number(formData.peoplePerRoom),
+          rent: Number(formData.rent),
+
+          photoCount: photos.length || existingProperty.photoCount || 0,
+          coverUrl,
+
+          totalCapacity:
+            Number(formData.rooms) * Number(formData.peoplePerRoom),
+
+          totalPotentialRent:
+            Number(formData.rooms) * Number(formData.rent),
+
+          // IMPORTANT:
+          // Do NOT change these existing values
+          inviteCode: existingProperty.inviteCode || null,
+          createdAt: existingProperty.createdAt,
+        };
+
+        updateProperty(editingPropertyId, updates);
+
+        notifyPropertiesUpdated();
+
+        // Go directly back to dashboard after editing
+        navigate("/manager-dashboard", {
+          replace: true,
+          state: {
+            propertyUpdated: true,
+            propertyId: editingPropertyId,
+          },
+        });
+
+        return;
+      }
+
+      // --------------------------------------------------
+      // CREATE NEW PROPERTY
+      // --------------------------------------------------
+
       let coverUrl = null;
+
       if (photos[0]?.file) {
         try {
-          coverUrl = await fileToDataUrl(photos[0].file, 1200, 0.8);
-        } catch (imageError) {
-          console.error("Image processing failed:", imageError);
-
-          setErrors((prev) => ({
-            ...prev,
-            submit: "Unable to process the property image.",
-          }));
-
-          setIsLoading(false);
-          return;
+          coverUrl = await fileToDataUrl(photos[0].file);
+        } catch {
+          coverUrl = null;
         }
       }
 
@@ -515,27 +634,16 @@ const Property = () => {
 
         name: formData.name.trim(),
         address: formData.address.trim(),
-        location: formData.address.trim(),
-
         type: formData.type,
-
         rooms: Number(formData.rooms),
-
         description: formData.description.trim(),
-
         peoplePerRoom: Number(formData.peoplePerRoom),
-
         rent: Number(formData.rent),
 
         photoCount: photos.length,
+        coverUrl,
 
-        // Main property image - Base64 encoded for persistence
-        coverUrl: coverUrl || null,
-
-        // Keep image aliases for other pages/components
-        image: coverUrl || null,
-        imageUrl: coverUrl || null,
-
+        // New property does not have a code yet
         inviteCode: null,
 
         createdAt: new Date().toISOString(),
@@ -547,13 +655,9 @@ const Property = () => {
           Number(formData.rooms) * Number(formData.rent),
 
         roomsList: [],
-
         residents: [],
-
         bills: [],
-
         expenses: [],
-
         chores: [],
 
         activities: [
@@ -570,12 +674,15 @@ const Property = () => {
       };
 
       addProperty(newProperty);
-      setCreatedProperty(newProperty);
       notifyPropertiesUpdated();
+
+      setCreatedProperty(newProperty);
       setStage("success");
     } catch (err) {
       setErrors({
-        submit: err.message || "Something went wrong. Please try again.",
+        submit:
+          err.message ||
+          "Something went wrong. Please try again.",
       });
     } finally {
       setIsLoading(false);
@@ -595,16 +702,40 @@ const Property = () => {
 
   const handleSaveCode = async () => {
     if (!canSaveCode) return;
+
     setIsSavingCode(true);
+
     try {
       await new Promise((resolve) => setTimeout(resolve, 900));
 
-      if (createdProperty?.id) {
-        updateProperty(createdProperty.id, { inviteCode });
-        notifyPropertiesUpdated();
+      const propertyId = createdProperty?.id || editingPropertyId;
+
+      if (!propertyId) {
+        throw new Error("Property could not be found.");
       }
 
-      setSavedCode(inviteCode);
+      updateProperty(propertyId, {
+        inviteCode: inviteCode.trim().toUpperCase(),
+      });
+
+      notifyPropertiesUpdated();
+
+      setSavedCode(inviteCode.trim().toUpperCase());
+
+      // If managing an existing invite code,
+      // return directly to the dashboard.
+      if (isManageInviteMode) {
+        navigate("/manager-dashboard", {
+          replace: true,
+          state: {
+            propertyUpdated: true,
+            propertyId,
+          },
+        });
+
+        return;
+      }
+
       setStage("inviteConfirm");
     } finally {
       setIsSavingCode(false);
@@ -759,11 +890,14 @@ const Property = () => {
               <Lock className="w-8 h-8 text-teal-600" />
             </div>
             <h2 className="text-2xl font-bold text-slate-900 mb-2">
-              Create Invitation Code
+              {isManageInviteMode
+                ? "Manage Invitation Code"
+                : "Create Invitation Code"}
             </h2>
             <p className="text-slate-500 mb-7">
-              Create a unique code that your roommates can use to find and
-              request to join {createdProperty?.name || "your property"}.
+              {isManageInviteMode
+                ? `Update the invitation code that roommates use to find and request to join ${createdProperty?.name || "your property"}.`
+                : `Create a unique code that your roommates can use to find and request to join ${createdProperty?.name || "your property"}.`}
             </p>
             <div className="text-left mb-1.5">
               <label
@@ -866,7 +1000,9 @@ const Property = () => {
                 </>
               ) : (
                 <>
-                  Save Code & Continue
+                  {isManageInviteMode
+                    ? "Save Invitation Code"
+                    : "Save Code & Continue"}
                   <ArrowRight className="w-5 h-5 transition-transform duration-200 group-hover:translate-x-1" />
                 </>
               )}
@@ -877,7 +1013,9 @@ const Property = () => {
               <div className="h-px flex-1 bg-slate-200" />
             </div>
             <p className="text-sm text-slate-500 mb-3">
-              Don't want to create one?
+              {isManageInviteMode
+                ? "Want a different code?"
+                : "Don't want to create one?"}
             </p>
             <button
               type="button"
@@ -885,7 +1023,7 @@ const Property = () => {
               className="w-full flex items-center justify-center gap-2 border border-slate-200 hover:border-teal-300 hover:bg-teal-50/50 text-slate-700 font-medium py-3 px-4 rounded-2xl transition-colors duration-200"
             >
               <Sparkles className="w-4 h-4 text-teal-600" />
-              Generate a Code
+              {isManageInviteMode ? "Generate a New Code" : "Generate a Code"}
             </button>
             <p className="flex items-center justify-center gap-1.5 text-xs text-slate-400 mt-7">
               <Lock className="w-3.5 h-3.5" />
@@ -970,11 +1108,12 @@ const Property = () => {
           <div className="text-center mb-8 animate-[fadeIn_0.5s_ease-out]">
             <SetupProgress currentKey={hasCoreDetails ? "photos" : "details"} />
             <h1 className="text-3xl font-bold text-slate-900 mb-2 mt-6">
-              Create Your Property
+              {isEditMode ? "Edit Your Property" : "Create Your Property"}
             </h1>
             <p className="text-slate-500 max-w-md mx-auto">
-              Set up your property, photos, and room information all in one
-              place.
+              {isEditMode
+                ? "Update your property details, photos, and room information."
+                : "Set up your property, photos, and room information all in one place."}
             </p>
           </div>
 
@@ -1432,11 +1571,11 @@ const Property = () => {
                           d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                         />
                       </svg>
-                      Creating property...
+                      {isEditMode ? "Updating property..." : "Creating property..."}
                     </>
                   ) : (
                     <>
-                      Create Property
+                      {isEditMode ? "Update Property" : "Create Property"}
                       <ArrowRight className="w-5 h-5 transition-transform duration-200 group-hover:translate-x-1" />
                     </>
                   )}
