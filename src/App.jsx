@@ -11,6 +11,9 @@ import ManagerDashboard from "./Property Manager/ManagerDashboard";
 import Property from "./Property Manager/Property";
 import RentPage from "./Property Manager/RentPage";
 import ExpensesPage from "./Property Manager/ExpensesPage";
+import BillPage from "./Property Manager/BillPage";
+import ReportPage from "./Property Manager/ReportPage";
+import Rooms from "./Property Manager/Rooms";
 
 // Roommate
 import JoinProperty from "./Roommate/JoinProperty";
@@ -23,6 +26,7 @@ function App() {
         {/* =========================
             Authentication
         ========================= */}
+
         <Route
           path="/login"
           element={<Login />}
@@ -43,45 +47,62 @@ function App() {
           element={<ResetPassword />}
         />
 
+
         {/* =========================
             Property Manager
         ========================= */}
 
-        {/* Dashboard */}
         <Route
           path="/manager-dashboard"
           element={<ManagerDashboard />}
         />
 
-        {/* Property */}
         <Route
           path="/property"
           element={<Property />}
         />
 
-        {/* Rent */}
         <Route
           path="/rent"
           element={<RentPage />}
         />
 
-        {/* Expenses */}
         <Route
           path="/manager/expenses"
           element={<ExpensesPage />}
         />
 
+        <Route
+          path="/manager/bills"
+          element={<BillPage />}
+        />
+
+        <Route
+          path="/manager/reports"
+          element={<ReportPage />}
+        />
+
+        {/* Rooms */}
+        <Route
+          path="/manager/rooms"
+          element={<Rooms />}
+        />
+
+
         {/* =========================
             Roommate
         ========================= */}
+
         <Route
           path="/join-property"
           element={<JoinProperty />}
         />
 
+
         {/* =========================
             Default
         ========================= */}
+
         <Route
           path="/"
           element={<Login />}
